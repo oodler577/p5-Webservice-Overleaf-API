@@ -6,9 +6,6 @@ use v5.10;
 use strict;
 use warnings;
 
-binmode(STDOUT, ':encoding(UTF-8)');
-binmode(STDERR, ':encoding(UTF-8)');
-
 use Carp qw/croak/;
 use HTML::Entities qw/encode_entities/;
 use Pod::Text;
@@ -18,6 +15,11 @@ use Util::H2O::More qw/Getopt2h2o o2h/;
 use Webservice::Overleaf::API qw//;
 
 our $VERSION = $Webservice::Overleaf::API::VERSION;
+
+# Overleaf project names and compile artifacts may contain Unicode.
+# Make all human-readable CLI output explicitly UTF-8.
+binmode(STDOUT, ':encoding(UTF-8)');
+binmode(STDERR, ':encoding(UTF-8)');
 
 use constant {
     EXIT_SUCCESS => 0,
@@ -680,7 +682,10 @@ arguments may be visible to other users on the same machine.
 
 Read the Overleaf browser-session cookie value from FILE.
 
-A single trailing newline is removed.
+The file should contain only the value of the C<overleaf_session2> cookie on a
+single line; do not include C<overleaf_session2=>.  A single trailing newline is
+removed.  See L</AUTHENTICATION> for the current procedure for creating the
+file and the approximately five-day session lifetime.
 
 =head2 --csrf VALUE
 
@@ -756,30 +761,98 @@ Set the remote name used by C<remote-add>.
 
 =head1 AUTHENTICATION
 
+C<overleaf> has two separate authentication paths because the official Git
+bridge and the experimental browser-session interface are different Overleaf
+services.
+
 =head2 Git bridge
 
 Git operations use Git's own authentication facilities.
 
-For Overleaf Cloud, a Git authentication token can be used by Git as the
-password for the C<git> user.  Store that credential using an appropriate Git
-credential helper rather than embedding it in a repository URL or command
+For Overleaf Cloud, create a Git authentication token in the Overleaf account
+settings under Git Integration.  Git uses C<git> as the username and the
+Overleaf Git token as the password.  Store the credential with an appropriate
+Git credential helper rather than embedding it in a repository URL or command
 line.
+
+The C<overleaf> client intentionally does not copy, store, or inject the Git
+token itself.
 
 =head2 Experimental browser-session operations
 
-Experimental project and compile operations use the Overleaf browser session.
+C<projects>, C<bootstrap>, C<zip>, C<compile>, C<pdf>, and C<output> use
+Overleaf's browser-session authentication and currently require the value of
+the C<overleaf_session2> cookie from an already authenticated browser.
 
-The preferred non-interactive form is:
+For Firefox:
 
-  export OVERLEAF_SESSION='...'
+=over 4
+
+=item 1.
+
+Log into L<https://www.overleaf.com/> normally.
+
+=item 2.
+
+Press F12, open the Storage tab, then open Cookies and select
+C<https://www.overleaf.com>.
+
+=item 3.
+
+Find the cookie named C<overleaf_session2> and copy its Value.
+
+=item 4.
+
+Save only that value in a local file.  Do not include the
+C<overleaf_session2=> prefix.
+
+=back
+
+For Chrome, Edge, and other Chromium-family browsers, the same value is under
+Developer Tools, Application, Storage, Cookies.
+
+For the current working-directory style used during development:
+
+  printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
+  chmod 600 session.out
+
+The resulting F<session.out> is simply one line containing the cookie value.
+It is not JSON, not a Netscape cookie file, and not a C<name=value> pair.
+
+Authenticate a command with:
+
+  overleaf --experimental --session-file ./session.out projects
+
+For a particular project:
+
+  overleaf --experimental --session-file ./session.out \
+      compile 672ba784883f09972c460cd6
+
+The same credential may instead be placed in the environment:
+
+  export OVERLEAF_SESSION='PASTE_COOKIE_VALUE_HERE'
   overleaf --experimental projects
 
-Alternatively:
+C<--session VALUE> is also supported, but C<--session-file> or
+C<OVERLEAF_SESSION> is preferable because direct command-line arguments may be
+visible in process listings and shell history.
 
-  overleaf --experimental --session-file ~/.config/overleaf/session projects
+=head2 How long does the session last?
 
-C<--session> is supported for completeness but is less desirable because
-process arguments may be observable.
+As of the Overleaf Cookie Policy last modified 5 August 2026,
+C<overleaf_session2> has a B<5-day retention period>.  In practical terms,
+treat F<session.out> as a short-lived credential and expect to copy a fresh
+C<overleaf_session2> value from the browser about every five days when needed.
+
+The five-day period is not a promise that a particular copied value will remain
+valid for exactly five days.  Logging out, revocation, rotation, security
+changes, or other server-side invalidation may end the session earlier.  If an
+experimental command begins returning an authentication failure, log into
+Overleaf in the browser and replace F<session.out> with the current cookie
+value.
+
+The current Overleaf cookie policy is published at
+L<https://www.overleaf.com/legal>.
 
 =head1 ENVIRONMENT
 
@@ -790,7 +863,17 @@ when no explicit session is supplied.
 
 =head1 EXAMPLES
 
-List projects:
+Create a protected browser-session file after copying the current
+C<overleaf_session2> value from browser Developer Tools:
+
+  printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
+  chmod 600 session.out
+
+List projects using that file:
+
+  overleaf --experimental --session-file ./session.out projects
+
+List projects using the environment instead:
 
   OVERLEAF_SESSION='...' overleaf --experimental projects
 

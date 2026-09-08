@@ -4,7 +4,7 @@ use v5.10;
 use strict;
 use warnings;
 
-our $VERSION = '0.02';
+our $VERSION = '0.01';
 
 use Carp qw/croak/;
 use Dispatch::Fu qw/dispatch on xdefault xshift_and_deref/;
@@ -755,11 +755,93 @@ Run Git using list-form C<system>, avoiding shell interpolation.  Authentication
 is intentionally left to Git's credential mechanism; this module does not put
 Overleaf Git authentication tokens on the command line or in remote URLs.
 
+=head1 AUTHENTICATION
+
+There are two distinct authentication paths because this module uses two
+separate Overleaf integration surfaces.
+
+=head2 Official Git bridge
+
+Git operations use the official Overleaf Git bridge.  For Overleaf Cloud,
+create a Git authentication token in the Overleaf account settings under Git
+Integration and let Git use that token as the password for the C<git> user.
+The same token can be used for the projects accessible to that Overleaf
+account.
+
+This module deliberately leaves credential storage to Git.  Use a Git
+credential helper rather than embedding the token in a remote URL or passing it
+on a command line.
+
+=head2 Experimental browser-session operations
+
+The experimental project-listing, ZIP, compile, PDF, and compile-output methods
+use the same authenticated browser session as the Overleaf web application.
+At present the practical authentication method is to copy the value of the
+C<overleaf_session2> cookie from a browser in which you are already logged in.
+
+For Firefox:
+
+=over 4
+
+=item 1.
+
+Log into L<https://www.overleaf.com/> normally.
+
+=item 2.
+
+Open Developer Tools with F12 and select Storage.
+
+=item 3.
+
+Open Cookies, select C<https://www.overleaf.com>, and find
+C<overleaf_session2>.
+
+=item 4.
+
+Copy only the cookie's Value, not the literal C<overleaf_session2=> prefix.
+
+=back
+
+Chrome-family browsers expose the same cookie under Developer Tools,
+Application, Storage, Cookies.
+
+The copied value can be supplied directly:
+
+    my $ol = Webservice::Overleaf::API->new(
+        experimental => 1,
+        session      => $session_value,
+    );
+
+or through the environment:
+
+    $ENV{OVERLEAF_SESSION} = $session_value;
+
+    my $ol = Webservice::Overleaf::API->new(
+        experimental => 1,
+    );
+
+Treat C<overleaf_session2> like a password.  It grants access as the logged-in
+Overleaf user and must not be committed, logged, pasted into bug reports, or
+otherwise disclosed.
+
+=head2 Session lifetime
+
+As of the Overleaf Cookie Policy last modified 5 August 2026,
+C<overleaf_session2> is a persistent authentication cookie with a retention
+period of B<5 days>.  A copied session value should therefore be treated as a
+short-lived credential and refreshed from the browser when authentication
+stops working.  Five days is a retention period, not a guarantee of validity:
+a session may become unusable earlier if it is logged out, revoked, rotated,
+or otherwise invalidated.
+
+See L<https://www.overleaf.com/legal> for Overleaf's current cookie policy.
+
 =head1 EXPERIMENTAL WEB APPLICATION INTERFACE
 
 These methods require both C<< experimental => 1 >> and an Overleaf session
 cookie.  C<OVERLEAF_SESSION> is used when C<session> is not passed directly.
-Treat this cookie like a password and do not commit or log it.
+See L</AUTHENTICATION> for the current browser-cookie procedure and session
+lifetime.  Treat this cookie like a password and do not commit or log it.
 
 =head2 bootstrap
 
@@ -796,6 +878,48 @@ C<< compile => $result >>.  With C<< to => $filename >> it writes the PDF.
 
 Downloads a named compile artifact from a previous C<compile> result.
 
+=head1 COMMAND-LINE CLIENT
+
+The distribution includes C<overleaf>, a command-line companion implemented as
+a modulino in F<bin/overleaf>.  It uses C<Util::H2O::More::Getopt2h2o> for
+option handling and C<Dispatch::Fu> for command routing.
+
+The supported Git and import interfaces are available directly, for example:
+
+    overleaf project-url 0123456789abcdef
+    overleaf git-url 0123456789abcdef
+    overleaf clone 0123456789abcdef paper
+    overleaf open-uri https://example.org/paper.zip
+
+The browser-session operations require C<--experimental>.  A convenient current
+workflow is to place only the value of C<overleaf_session2> in a protected file:
+
+    printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
+    chmod 600 session.out
+
+and then run, for example:
+
+    overleaf --experimental --session-file ./session.out projects
+    overleaf --experimental --session-file ./session.out \
+        compile 0123456789abcdef
+    overleaf --experimental --session-file ./session.out \
+        --output paper.pdf pdf 0123456789abcdef
+
+The session file is a single line containing only the cookie value.  It is not
+a JSON file, Netscape cookie jar, or C<name=value> pair.  The command also
+accepts C<OVERLEAF_SESSION> or C<--session>, although C<--session-file> avoids
+placing the credential directly in the process argument list.
+
+Because Overleaf currently documents a five-day retention period for
+C<overleaf_session2>, expect to refresh F<session.out> periodically by copying a
+fresh cookie value from a logged-in browser.
+
+Run:
+
+    overleaf --help
+
+for the complete command reference.
+
 =head1 DISPATCH INTERFACE
 
 =head2 call
@@ -826,6 +950,7 @@ endpoint changes in practice.
 L<Dispatch::Fu>, L<Util::H2O::More>, L<HTTP::Tiny>,
 L<https://www.overleaf.com/devs>,
 L<https://www.overleaf.com/learn/how-to/Git_integration>,
+L<https://www.overleaf.com/legal>,
 L<https://github.com/aloth/olcli>
 
 =head1 AUTHOR
