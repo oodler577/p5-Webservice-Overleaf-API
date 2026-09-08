@@ -6,6 +6,9 @@ use v5.10;
 use strict;
 use warnings;
 
+binmode(STDOUT, ':encoding(UTF-8)');
+binmode(STDERR, ':encoding(UTF-8)');
+
 use Carp qw/croak/;
 use HTML::Entities qw/encode_entities/;
 use Pod::Text;
