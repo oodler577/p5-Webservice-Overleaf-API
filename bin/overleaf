@@ -8,7 +8,7 @@ use warnings;
 
 use Carp qw/croak/;
 use HTML::Entities qw/encode_entities/;
-use Pod::Usage qw/pod2usage/;
+use Pod::Text;
 
 use Dispatch::Fu;
 use Util::H2O::More qw/Getopt2h2o o2h/;
@@ -201,25 +201,32 @@ sub _html_attr {
     return encode_entities(_text(shift), q{<>&"'});
 }
 
+sub _print_usage {
+    my $fh = shift;
+    print {$fh} <<"USAGE";
+Usage:
+  overleaf [global-options] COMMAND [command-arguments]
+  overleaf --help
+  overleaf --version
+
+Try 'overleaf --help' for the full manual.
+USAGE
+    return;
+}
+
 sub do_help {
-    pod2usage(
-        -input   => __FILE__,
-        -exitval => 'NOEXIT',
-        -verbose => 2,
-        -output  => \*STDOUT,
+    my $parser = Pod::Text->new(
+        sentence => 0,
+        width    => 78,
     );
+    $parser->parse_from_file(__FILE__, \*STDOUT);
     return EXIT_SUCCESS;
 }
 
 sub do_usage {
     my ($Client, $command) = xshift_and_deref @_;
     print STDERR "overleaf: unknown command '" . _text($command) . "'\n";
-    pod2usage(
-        -input   => __FILE__,
-        -exitval => 'NOEXIT',
-        -verbose => 0,
-        -output  => \*STDERR,
-    );
+    _print_usage(\*STDERR);
     return EXIT_USAGE;
 }
 

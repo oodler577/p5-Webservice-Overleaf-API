@@ -62,7 +62,7 @@ overleaf --experimental --output output.log output PROJECT_ID output.log
 ```
 
 The CLI uses `Util::H2O::More::Getopt2h2o` for options and `Dispatch::Fu`
-for command dispatch. Git authentication remains with Git's credential
+for command dispatch. Its `--help` output is rendered directly from the embedded POD with `Pod::Text`. Git authentication remains with Git's credential
 handling. Experimental web-application operations use `OVERLEAF_SESSION`,
 `--session-file`, or `--session`.
 
