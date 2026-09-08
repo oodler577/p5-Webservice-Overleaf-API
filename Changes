@@ -1,6 +1,9 @@
 Revision history for Webservice::Overleaf::API.
 
 0.01 Mon Sep 7 15:01:00 2026
+     - initial upload
+
+0.02 Mon Sep 7 15:01:00 2026
      - render CLI --help directly from embedded POD with core Pod::Text,
        avoiding a newer Pod::Usage dependency that breaks installation on
        Perl 5.10
