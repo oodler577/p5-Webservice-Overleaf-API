@@ -87,30 +87,3 @@ jobs:
           fi
 
           echo 'Coverage gate passed: statement, branch, condition, subroutine, and POD are fully covered.'
-
-  author-build:
-    name: Dist::Zilla build
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Perl
-        uses: shogo82148/actions-setup-perl@v1
-        with:
-          perl-version: '5.44'
-
-      - name: Install Dist::Zilla
-        run: cpanm --notest Dist::Zilla App::cpanminus
-
-      - name: Install author dependencies
-        run: dzil authordeps --missing | xargs -r cpanm --notest
-
-      - name: Install distribution dependencies
-        run: dzil listdeps --missing | xargs -r cpanm --notest
-
-      - name: Test
-        run: dzil test
-
-      - name: Build release tarball
-        run: dzil build

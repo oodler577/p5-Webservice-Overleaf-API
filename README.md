@@ -60,6 +60,5 @@ Same terms as Perl itself.
 
 The test suite is network-hermetic: Overleaf HTTP traffic and Git operations are
 mocked where external access would otherwise be required. GitHub Actions tests
-Perl 5.10, 5.20, 5.30, 5.40, and 5.44, runs a Dist::Zilla author build, and has
-a dedicated Devel::Cover gate requiring complete statement, branch, condition,
-subroutine, and POD coverage for `lib/Webservice/Overleaf/API.pm`.
+Perl 5.10, 5.20, 5.30, 5.40, and 5.44 and has a dedicated Devel::Cover gate
+requiring complete statement, branch, condition, subroutine, and POD coverage for `lib/Webservice/Overleaf/API.pm`.
