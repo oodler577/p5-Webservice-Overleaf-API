@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  runtime-tests:
+    name: Perl ${{ matrix.perl }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        perl:
+          - '5.10'
+          - '5.20'
+          - '5.30'
+          - '5.40'
+          - '5.44'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+
+      - name: Install runtime and test dependencies
+        run: >-
+          cpanm --notest
+          Dispatch::Fu Util::H2O::More
+          HTTP::Tiny JSON::PP URI::Escape MIME::Base64 HTML::Entities
+          Test::More File::Temp File::Spec
+
+      - name: Run tests
+        run: prove -lr t
+
+  coverage:
+    name: Full coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.44'
+
+      - name: Install dependencies and coverage tools
+        run: >-
+          cpanm --notest
+          Dispatch::Fu Util::H2O::More
+          HTTP::Tiny JSON::PP URI::Escape MIME::Base64 HTML::Entities
+          Test::More File::Temp File::Spec
+          Devel::Cover Pod::Coverage
+
+      - name: Collect coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          cover -delete
+          HARNESS_PERL_SWITCHES='-MDevel::Cover=-coverage,statement,branch,condition,subroutine,pod' prove -lr t
+
+      - name: Report and enforce 100 percent coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COVER_ARGS=(
+            -select_re 'Webservice/Overleaf/API\.pm$'
+            -coverage statement
+            -coverage branch
+            -coverage condition
+            -coverage subroutine
+            -coverage pod
+          )
+
+          cover -silent -report text "${COVER_ARGS[@]}"
+
+          uncovered="$(cover -silent -report compilation "${COVER_ARGS[@]}")"
+          if [[ -n "$uncovered" ]]; then
+            printf '%s\n' "$uncovered"
+            echo 'Coverage gate failed: lib/Webservice/Overleaf/API.pm is not 100% covered.' >&2
+            exit 1
+          fi
+
+          echo 'Coverage gate passed: statement, branch, condition, subroutine, and POD are fully covered.'
+
+  author-build:
+    name: Dist::Zilla build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.44'
+
+      - name: Install Dist::Zilla
+        run: cpanm --notest Dist::Zilla App::cpanminus
+
+      - name: Install author dependencies
+        run: dzil authordeps --missing | xargs -r cpanm --notest
+
+      - name: Install distribution dependencies
+        run: dzil listdeps --missing | xargs -r cpanm --notest
+
+      - name: Test
+        run: dzil test
+
+      - name: Build release tarball
+        run: dzil build

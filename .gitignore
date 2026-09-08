@@ -1,0 +1,8 @@
+/.build/
+/Webservice-Overleaf-API-*/
+/Webservice-Overleaf-API-*.tar.gz
+/cover_db/
+/.prove
+/.olauth
+*.secret
+*.secret.*
