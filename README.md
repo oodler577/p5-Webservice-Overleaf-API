@@ -38,7 +38,7 @@ $ol->download_pdf('PROJECT_ID', compile => $compile, to => 'paper.pdf');
 $ol->download_output($compile, 'output.log', to => 'output.log');
 ```
 
-`OVERLEAF_SESSION` is a browser authentication credential. Treat it like a password: do not commit it, print it, or put it in command-line arguments.
+`OVERLEAF_SESSION` is a browser authentication credential. The current practical method is to copy only the value of the `overleaf_session2` cookie from an authenticated browser. Overleaf's Cookie Policy (last modified 5 August 2026) lists a 5-day retention period for this cookie; treat that as an approximate credential lifetime, since logout or server-side invalidation can end it earlier. Treat the value like a password: do not commit it, print it, or put it in command-line arguments.
 
 
 ## Command-line client
@@ -54,6 +54,11 @@ overleaf git-url PROJECT_ID
 overleaf clone PROJECT_ID paper
 overleaf open-uri --engine lualatex --main-document main.tex https://example.org/paper.zip
 
+printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
+chmod 600 session.out
+overleaf --experimental --session-file ./session.out projects
+
+# or via the environment
 export OVERLEAF_SESSION='...'
 overleaf --experimental projects
 overleaf --experimental --resource-path main.tex compile PROJECT_ID

@@ -4,7 +4,7 @@ use v5.10;
 use strict;
 use warnings;
 
-our $VERSION = '0.01';
+our $VERSION = '0.03';
 
 use Carp qw/croak/;
 use Dispatch::Fu qw/dispatch on xdefault xshift_and_deref/;
@@ -827,12 +827,15 @@ otherwise disclosed.
 =head2 Session lifetime
 
 As of the Overleaf Cookie Policy last modified 5 August 2026,
-C<overleaf_session2> is a persistent authentication cookie with a retention
+C<overleaf_session2> is an authentication cookie with a documented retention
 period of B<5 days>.  A copied session value should therefore be treated as a
 short-lived credential and refreshed from the browser when authentication
-stops working.  Five days is a retention period, not a guarantee of validity:
-a session may become unusable earlier if it is logged out, revoked, rotated,
-or otherwise invalidated.
+stops working.
+
+The five-day retention period is not a guarantee that a particular copied
+session will remain valid for exactly five days.  Logging out, revocation,
+rotation, security changes, or other server-side invalidation may make it stop
+working earlier.
 
 See L<https://www.overleaf.com/legal> for Overleaf's current cookie policy.
 
@@ -910,9 +913,10 @@ a JSON file, Netscape cookie jar, or C<name=value> pair.  The command also
 accepts C<OVERLEAF_SESSION> or C<--session>, although C<--session-file> avoids
 placing the credential directly in the process argument list.
 
-Because Overleaf currently documents a five-day retention period for
-C<overleaf_session2>, expect to refresh F<session.out> periodically by copying a
-fresh cookie value from a logged-in browser.
+Overleaf currently documents a five-day retention period for
+C<overleaf_session2>, so expect to refresh F<session.out> periodically by
+copying a fresh cookie value from a logged-in browser.  See L</AUTHENTICATION>
+for the caveat that the credential may become invalid earlier.
 
 Run:
 

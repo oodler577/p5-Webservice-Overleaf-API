@@ -6,6 +6,9 @@ use v5.10;
 use strict;
 use warnings;
 
+binmode(STDOUT, ':encoding(UTF-8)');
+binmode(STDERR, ':encoding(UTF-8)');
+
 use Carp qw/croak/;
 use HTML::Entities qw/encode_entities/;
 use Pod::Text;
@@ -15,11 +18,6 @@ use Util::H2O::More qw/Getopt2h2o o2h/;
 use Webservice::Overleaf::API qw//;
 
 our $VERSION = $Webservice::Overleaf::API::VERSION;
-
-# Overleaf project names and compile artifacts may contain Unicode.
-# Make all human-readable CLI output explicitly UTF-8.
-binmode(STDOUT, ':encoding(UTF-8)');
-binmode(STDERR, ':encoding(UTF-8)');
 
 use constant {
     EXIT_SUCCESS => 0,
@@ -811,7 +809,7 @@ C<overleaf_session2=> prefix.
 For Chrome, Edge, and other Chromium-family browsers, the same value is under
 Developer Tools, Application, Storage, Cookies.
 
-For the current working-directory style used during development:
+For the current working-directory style:
 
   printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
   chmod 600 session.out
@@ -840,9 +838,10 @@ visible in process listings and shell history.
 =head2 How long does the session last?
 
 As of the Overleaf Cookie Policy last modified 5 August 2026,
-C<overleaf_session2> has a B<5-day retention period>.  In practical terms,
-treat F<session.out> as a short-lived credential and expect to copy a fresh
-C<overleaf_session2> value from the browser about every five days when needed.
+C<overleaf_session2> has a documented B<5-day retention period>.  In practical
+terms, treat F<session.out> as a short-lived credential and expect to copy a
+fresh C<overleaf_session2> value from the browser about every five days when
+needed.
 
 The five-day period is not a promise that a particular copied value will remain
 valid for exactly five days.  Logging out, revocation, rotation, security

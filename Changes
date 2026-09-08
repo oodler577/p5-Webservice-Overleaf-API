@@ -1,11 +1,14 @@
 Revision history for Webservice::Overleaf::API.
 
 0.01 Mon Sep 7 15:01:00 2026
-     - documented the overleaf command-line client in Webservice::Overleaf::API
-       and expanded CLI authentication POD with the current overleaf_session2
-       browser-cookie workflow and Overleaf's documented five-day cookie retention
-     - make overleaf STDOUT and STDERR explicitly UTF-8 so Unicode
-       project names and compile artifact names do not produce wide-character warnings
+     - initial upload
+
+0.03 Tue Sep 8 08:56:00 2026
+     - documented the overleaf command-line client from
+       Webservice::Overleaf::API, including current Git and browser-session
+       authentication procedures
+     - documented overleaf_session2 session-file creation and Overleaf's
+       current five-day cookie retention period, with invalidation caveats
      - render CLI --help directly from embedded POD with core Pod::Text,
        avoiding a newer Pod::Usage dependency that breaks installation on
        Perl 5.10

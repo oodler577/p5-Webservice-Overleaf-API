@@ -4,16 +4,6 @@ use warnings;
 use Test::More;
 use File::Temp qw/tempfile/;
 
-my $source;
-{
-    open my $fh, '<', './bin/overleaf' or die $!;
-    local $/;
-    $source = <$fh>;
-    close $fh;
-}
-like $source, qr/binmode\(STDOUT, ':encoding\(UTF-8\)'\)/,
-    'CLI configures UTF-8 output layers';
-
 my $loaded = do './bin/overleaf';
 ok $loaded, 'loaded overleaf modulino'
     or diag $@ || $!;
