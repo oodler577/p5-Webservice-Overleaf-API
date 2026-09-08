@@ -77,11 +77,21 @@ jobs:
             -coverage pod
           )
 
-          cover -silent -report text "${COVER_ARGS[@]}"
+          cover -silent -report text "${COVER_ARGS[@]}" | tee coverage.txt
 
-          uncovered="$(cover -silent -report compilation "${COVER_ARGS[@]}")"
-          if [[ -n "$uncovered" ]]; then
-            printf '%s\n' "$uncovered"
+          if ! awk '
+            $1 == "lib/Webservice/Overleaf/API.pm" {
+              found = 1
+              for (i = 2; i <= 6; i++) {
+                if (($i + 0) < 100) {
+                  bad = 1
+                }
+              }
+            }
+            END {
+              exit !(found && !bad)
+            }
+          ' coverage.txt; then
             echo 'Coverage gate failed: lib/Webservice/Overleaf/API.pm is not 100% covered.' >&2
             exit 1
           fi
