@@ -336,7 +336,9 @@ sub download_pdf {
     $self->_require_experimental;
     $self->_require_session;
     my $compile = delete $opts{compile};
-    $compile ||= $self->compile($project_id, %opts);
+    if (!$compile) {
+        $compile = $self->compile($project_id, %opts);
+    }
 
     my $pdf_url = eval { $compile->pdf_url };
     $pdf_url = $compile->{pdf_url} if !$pdf_url && ref($compile) eq 'HASH';
