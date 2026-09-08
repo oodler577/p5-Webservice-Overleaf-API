@@ -1,11 +1,53 @@
 # Webservice::Overleaf::API
 
-A Perl client for Overleaf integration surfaces.
+`Webservice::Overleaf::API` is a Perl client for useful Overleaf integration
+surfaces. The distribution also installs the `overleaf` command-line client.
 
-The distribution deliberately separates:
+The project deliberately distinguishes two kinds of integration:
 
-* **Official/supported interfaces** — Overleaf's **Open in Overleaf** import interface and Git bridge.
-* **Experimental interfaces** — browser-session project listing, project ZIP download, remote compilation, PDF download, and compile artifacts. These use undocumented Overleaf web-application endpoints and require `experimental => 1`.
+* **Documented Overleaf interfaces**: Open in Overleaf and the Git bridge.
+* **Experimental browser-session interfaces**: project listing, project ZIP
+  download, remote compilation, PDF download, and compilation artifacts.
+
+The experimental operations use observable Overleaf web-application behavior
+rather than a documented stable public API, so they require explicit opt-in in
+the Perl API (`experimental => 1`) and in the CLI (`--experimental`).
+
+## Installation
+
+From CPAN:
+
+```sh
+cpanm Webservice::Overleaf::API
+```
+
+The distribution declares the SSL/TLS modules required by `HTTP::Tiny`, so a
+normal CPAN/cpanm installation also pulls in the Perl-side HTTPS stack used to
+communicate with Overleaf.
+
+Check the installed client:
+
+```sh
+overleaf --version
+overleaf --help
+```
+
+For development from a checkout:
+
+```sh
+cpanm Dist::Zilla
+dzil authordeps --missing | cpanm --notest
+dzil listdeps --missing | cpanm --notest
+dzil test
+dzil build
+```
+
+Dist::Zilla is part of the local/release workflow; GitHub CI intentionally runs
+the tests directly and does not invoke `dzil`.
+
+## Perl API quick start
+
+The documented import and Git URL helpers do not require a browser session:
 
 ```perl
 use Webservice::Overleaf::API;
@@ -18,78 +60,453 @@ my $url = $ol->open_uri(
     main_document => 'main.tex',
 );
 
+say $ol->project_url('PROJECT_ID');
 say $ol->git_url('PROJECT_ID');
 ```
 
-Experimental use:
+Experimental project and compilation operations require an authenticated
+browser session:
 
 ```perl
+use Webservice::Overleaf::API;
+
 my $ol = Webservice::Overleaf::API->new(
     experimental => 1,
     session      => $ENV{OVERLEAF_SESSION},
 );
 
 for my $project ($ol->projects->all) {
-    say $project->name;
+    say join "\t", $project->id, $project->name;
 }
 
 my $compile = $ol->compile('PROJECT_ID');
-$ol->download_pdf('PROJECT_ID', compile => $compile, to => 'paper.pdf');
-$ol->download_output($compile, 'output.log', to => 'output.log');
+
+$ol->download_pdf(
+    'PROJECT_ID',
+    compile => $compile,
+    to      => 'paper.pdf',
+);
+
+$ol->download_output(
+    $compile,
+    'output.log',
+    to => 'output.log',
+);
 ```
 
-`OVERLEAF_SESSION` is a browser authentication credential. The current practical method is to copy only the value of the `overleaf_session2` cookie from an authenticated browser. Overleaf's Cookie Policy (last modified 5 August 2026) lists a 5-day retention period for this cookie; treat that as an approximate credential lifetime, since logout or server-side invalidation can end it earlier. Treat the value like a password: do not commit it, print it, or put it in command-line arguments.
+## CLI: start-to-finish practical workflow
 
+The following sequence is intended to be usable as a real working session.
 
-## Command-line client
+### 1. Get the Overleaf browser session
 
-The distribution includes the `overleaf` modulino in `bin/overleaf`.
+Log into `https://www.overleaf.com/` in your normal browser.
+
+**Firefox**
+
+1. Press `F12`.
+2. Open **Storage**.
+3. Open **Cookies** and select `https://www.overleaf.com`.
+4. Find `overleaf_session2`.
+5. Copy only its **Value**.
+
+**Chrome / Edge / Chromium**
+
+1. Press `F12`.
+2. Open **Application**.
+3. Under **Storage**, open **Cookies**.
+4. Select `https://www.overleaf.com`.
+5. Find `overleaf_session2` and copy only its **Value**.
+
+Create a session file containing only that value:
+
+```sh
+printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > ~/.ol-session.txt
+chmod 600 ~/.ol-session.txt
+```
+
+Do **not** put this in the file:
+
+```text
+overleaf_session2=...
+```
+
+The file is one line containing only the cookie value.
+
+For subsequent commands:
+
+```sh
+SESSION=~/.ol-session.txt
+```
+
+Overleaf's Cookie Policy currently documents a **5-day retention period** for
+`overleaf_session2`. Treat that as an approximate lifetime: logout, rotation,
+revocation, or server-side invalidation can end a particular session sooner.
+When commands begin failing authentication, copy a fresh cookie value from the
+browser.
+
+### 2. Validate authentication
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  bootstrap
+```
+
+Expected:
+
+```text
+authenticated
+```
+
+### 3. List projects
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  projects
+```
+
+Output is tab-separated:
+
+```text
+PROJECT_ID    PROJECT NAME    LAST_UPDATED
+```
+
+Choose one:
+
+```sh
+ID=0123456789abcdef
+```
+
+Useful non-session URL helpers:
+
+```sh
+overleaf project-url "$ID"
+overleaf git-url "$ID"
+```
+
+### 4. Download and inspect the project source
+
+Download the project ZIP:
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --output project.zip \
+  zip "$ID"
+```
+
+Inspect everything:
+
+```sh
+unzip -l project.zip
+```
+
+Find TeX source files:
+
+```sh
+unzip -l project.zip | grep -Ei '\.tex$'
+```
+
+Extract the full tree:
+
+```sh
+mkdir project-src
+cd project-src
+unzip ../project.zip
+find . -type f -name '*.tex' -print
+cd ..
+```
+
+This is an important distinction:
+
+* `zip` retrieves the **project/source tree**.
+* `compile` reports **generated build artifacts**.
+
+If `compile | grep tex` only shows names such as `output.chktex`,
+`output.fdb_latexmk`, or `output.synctex.gz`, that is expected; those are build
+products, not source `.tex` files.
+
+### 5. Compile on Overleaf
+
+Compile using the root document currently configured by Overleaf:
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  compile "$ID"
+```
+
+Typical beginning of the output:
+
+```text
+status  success
+pdf     https://www.overleaf.com/project/.../output/output.pdf?...
+```
+
+It then lists generated files such as:
+
+```text
+output  output.aux       aux       ...
+output  output.bbl       bbl       ...
+output  output.chktex    chktex    ...
+output  output.log       log       ...
+output  output.pdf       pdf       ...
+output  output.stderr    stderr    ...
+output  output.stdout    stdout    ...
+```
+
+A project using `minted` may produce many `_minted-output/*.pygtex` and
+`*.pygstyle` entries. That is normal.
+
+### 6. Find the root TeX document
+
+Retrieve the compilation log:
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --output output.log \
+  output "$ID" output.log
+```
+
+The log normally begins with a line like:
+
+```text
+**user_guide.tex
+```
+
+Extract just that first root-document line:
+
+```sh
+grep -m1 '^\*\*[^*]' output.log
+```
+
+Set the filename:
+
+```sh
+ROOT_TEX=user_guide.tex
+```
+
+### 7. Compile an explicit root
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --resource-path "$ROOT_TEX" \
+  compile "$ID"
+```
+
+This is especially useful for projects containing more than one compilable TeX
+document.
+
+### 8. Download and view the PDF
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --resource-path "$ROOT_TEX" \
+  --output document.pdf \
+  pdf "$ID"
+```
+
+Check the result:
+
+```sh
+file document.pdf
+ls -lh document.pdf
+```
+
+On Linux:
+
+```sh
+xdg-open document.pdf >/dev/null 2>&1 &
+```
+
+On Windows from MSYS2 or Git Bash:
+
+```sh
+start document.pdf
+```
+
+If an explicit Windows path is needed:
+
+```sh
+cmd.exe /c start "" "$(cygpath -w document.pdf)"
+```
+
+### 9. Retrieve useful build artifacts
+
+The `output` command performs a compile and downloads one reported artifact:
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --output document.log \
+  output "$ID" output.log
+
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --output document.bbl \
+  output "$ID" output.bbl
+
+overleaf --experimental \
+  --session-file "$SESSION" \
+  --output document.chktex \
+  output "$ID" output.chktex
+```
+
+Then ordinary shell tools work well:
+
+```sh
+tail -100 document.log
+cat document.bbl
+cat document.chktex
+```
+
+Only artifacts returned by the Overleaf compile can be downloaded this way.
+
+## Git integration
+
+The Git bridge is separate from the browser-session interface. It does not use
+`~/.ol-session.txt`.
+
+Overleaf's Git integration uses token-based Git authentication and is currently
+a premium feature on Overleaf Cloud. Let Git handle and store the credential
+rather than embedding it in URLs.
+
+Print the Git URL:
+
+```sh
+overleaf git-url "$ID"
+```
+
+Clone:
+
+```sh
+overleaf clone "$ID" my-paper
+```
+
+Inspect:
+
+```sh
+cd my-paper
+git status
+git remote -v
+git log --oneline -10
+cd ..
+```
+
+Pull edits made through the Overleaf web editor:
+
+```sh
+overleaf pull my-paper
+```
+
+After making and committing local changes:
+
+```sh
+cd my-paper
+git add .
+git commit -m 'update paper'
+cd ..
+```
+
+For a clone whose current branch tracks the Overleaf remote:
+
+```sh
+overleaf push my-paper
+```
+
+`push` changes the Overleaf project, so inspect `git status` and your commits
+first.
+
+### Add an Overleaf remote to an existing repository
+
+```sh
+cd existing-paper
+overleaf remote-add . "$ID" overleaf
+git remote -v
+```
+
+Overleaf's Git bridge is not a full general-purpose Git server. It presents one
+linear project history and the remote branch is currently named `master`.
+Overleaf's documented setup for an unrelated existing repository includes
+reconciling the histories before the first push. Once prepared, an explicit
+push is typically:
+
+```sh
+git push overleaf master --set-upstream
+```
+
+A differently named local branch can be mapped to Overleaf's branch:
+
+```sh
+git push overleaf my-branch:master
+```
+
+The Git bridge creates commits as needed when Git fetch/pull/push operations
+translate between Overleaf's internal History system and Git.
+
+## Open in Overleaf
+
+Generate an Open in Overleaf URL from a remotely hosted TeX or ZIP file:
+
+```sh
+overleaf open-uri \
+  --engine lualatex \
+  --main-document main.tex \
+  https://example.org/project.zip
+```
+
+Generate an import URL from a local TeX file:
+
+```sh
+overleaf open-data paper.tex
+```
+
+Generate a complete HTML POST form containing a TeX snippet:
+
+```sh
+overleaf snippet-form paper.tex
+```
+
+## Authentication summary
+
+There are two credentials, used for two different integration surfaces:
+
+| Operation | Credential |
+| --- | --- |
+| `projects`, `bootstrap`, `zip`, `compile`, `pdf`, `output` | `overleaf_session2` browser session |
+| `clone`, `pull`, `push`, Git remote access | Overleaf Git authentication token |
+| `project-url`, `git-url`, `open-uri`, `open-data`, `snippet-form` | none required by the client |
+
+The browser cookie is a credential: do not commit it, print it in logs, include
+it in bug reports, or put it directly on a command line when a session file or
+environment variable will do.
+
+## Testing and CI
+
+The test suite is network-hermetic. HTTP traffic and Git operations are mocked
+where external access would otherwise be required.
+
+GitHub Actions currently tests Perl 5.10, 5.20, 5.30, 5.40, and 5.44.
+
+## Documentation
+
+Full module documentation:
+
+```sh
+perldoc Webservice::Overleaf::API
+```
+
+Full CLI documentation:
 
 ```sh
 overleaf --help
-overleaf --version
-
-overleaf project-url PROJECT_ID
-overleaf git-url PROJECT_ID
-overleaf clone PROJECT_ID paper
-overleaf open-uri --engine lualatex --main-document main.tex https://example.org/paper.zip
-
-printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
-chmod 600 session.out
-overleaf --experimental --session-file ./session.out projects
-
-# or via the environment
-export OVERLEAF_SESSION='...'
-overleaf --experimental projects
-overleaf --experimental --resource-path main.tex compile PROJECT_ID
-overleaf --experimental --resource-path main.tex --output paper.pdf pdf PROJECT_ID
-overleaf --experimental --output output.log output PROJECT_ID output.log
 ```
-
-The CLI uses `Util::H2O::More::Getopt2h2o` for options and `Dispatch::Fu`
-for command dispatch. Its `--help` output is rendered directly from the embedded POD with `Pod::Text`. Git authentication remains with Git's credential
-handling. Experimental web-application operations use `OVERLEAF_SESSION`,
-`--session-file`, or `--session`.
-
-## Development
-
-```sh
-cpanm Dist::Zilla
-dzil authordeps --missing | cpanm --notest
-dzil listdeps --missing | cpanm --notest
-dzil test
-dzil build
-```
-
-All tests use injected mock transports/runners and make no live Overleaf requests.
 
 ## License
 
 Same terms as Perl itself.
-
-## Testing and CI
-
-The test suite is network-hermetic: Overleaf HTTP traffic and Git operations are
-mocked where external access would otherwise be required. GitHub Actions tests
-Perl 5.10, 5.20, 5.30, 5.40, and 5.44. Dist::Zilla remains part of the local
-development/release workflow but is not used by CI.

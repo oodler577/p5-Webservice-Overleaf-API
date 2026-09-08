@@ -4,7 +4,7 @@ use v5.10;
 use strict;
 use warnings;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use Carp qw/croak/;
 use Dispatch::Fu qw/dispatch on xdefault xshift_and_deref/;
@@ -887,42 +887,123 @@ The distribution includes C<overleaf>, a command-line companion implemented as
 a modulino in F<bin/overleaf>.  It uses C<Util::H2O::More::Getopt2h2o> for
 option handling and C<Dispatch::Fu> for command routing.
 
-The supported Git and import interfaces are available directly, for example:
+The CLI exposes the same two broad integration surfaces as the module:
 
-    overleaf project-url 0123456789abcdef
-    overleaf git-url 0123456789abcdef
-    overleaf clone 0123456789abcdef paper
-    overleaf open-uri https://example.org/paper.zip
+=over 4
 
-The browser-session operations require C<--experimental>.  A convenient current
-workflow is to place only the value of C<overleaf_session2> in a protected file:
+=item *
 
-    printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > session.out
-    chmod 600 session.out
+The documented Open in Overleaf interface and Git bridge.
 
-and then run, for example:
+=item *
 
-    overleaf --experimental --session-file ./session.out projects
-    overleaf --experimental --session-file ./session.out \
-        compile 0123456789abcdef
-    overleaf --experimental --session-file ./session.out \
-        --output paper.pdf pdf 0123456789abcdef
+The explicitly opt-in browser-session interface used for project listing,
+project ZIP download, remote compilation, PDF retrieval, and build artifacts.
 
-The session file is a single line containing only the cookie value.  It is not
-a JSON file, Netscape cookie jar, or C<name=value> pair.  The command also
-accepts C<OVERLEAF_SESSION> or C<--session>, although C<--session-file> avoids
-placing the credential directly in the process argument list.
+=back
 
-Overleaf currently documents a five-day retention period for
-C<overleaf_session2>, so expect to refresh F<session.out> periodically by
-copying a fresh cookie value from a logged-in browser.  See L</AUTHENTICATION>
-for the caveat that the credential may become invalid earlier.
+For day-to-day work, a practical session-based setup is:
 
-Run:
+    # Copy only the value of the overleaf_session2 browser cookie.
+    printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > ~/.ol-session.txt
+    chmod 600 ~/.ol-session.txt
 
-    overleaf --help
+    SESSION=~/.ol-session.txt
 
-for the complete command reference.
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        bootstrap
+
+A successful bootstrap prints:
+
+    authenticated
+
+List projects and choose the project ID you want to work with:
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        projects
+
+    ID=0123456789abcdef
+
+A project ZIP is the easiest way to inspect the source tree:
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        --output project.zip \
+        zip "$ID"
+
+    unzip -l project.zip
+    unzip -l project.zip | grep -Ei '\.tex$'
+
+The C<compile> command is different: it lists B<build artifacts>, not source
+files.  It prints the compilation status, PDF URL, and generated files such as
+C<output.log>, C<output.bbl>, C<output.chktex>, and C<output.pdf>:
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        compile "$ID"
+
+A useful way to discover the root TeX document used by Overleaf is to retrieve
+the compilation log and inspect its initial C<**filename.tex> line:
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        --output output.log \
+        output "$ID" output.log
+
+    grep -m1 '^\*\*[^*]' output.log
+
+Once the root is known, it can be requested explicitly:
+
+    ROOT_TEX=user_guide.tex
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        --resource-path "$ROOT_TEX" \
+        compile "$ID"
+
+Download the resulting PDF:
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        --resource-path "$ROOT_TEX" \
+        --output document.pdf \
+        pdf "$ID"
+
+On a Linux desktop:
+
+    xdg-open document.pdf >/dev/null 2>&1 &
+
+From MSYS2/Git Bash on Windows:
+
+    start document.pdf
+
+The Git bridge is separate from the browser-session credential.  Git uses
+Overleaf's token-based Git authentication and its normal credential handling.
+For a project with Git integration enabled:
+
+    overleaf git-url "$ID"
+    overleaf clone "$ID" my-paper
+    overleaf pull my-paper
+
+After editing and committing locally, a clone whose branch already tracks the
+Overleaf remote can normally be pushed with:
+
+    overleaf push my-paper
+
+For an existing local Git repository, add Overleaf as a named remote:
+
+    overleaf remote-add . "$ID" overleaf
+    git remote -v
+
+Overleaf's Git bridge represents a single linear project history and currently
+uses the remote C<master> branch.  When connecting an unrelated existing
+repository, consult Overleaf's Git integration documentation before the first
+pull or push.
+
+C<overleaf --help> contains the complete command reference and a more detailed
+start-to-finish walkthrough.
 
 =head1 DISPATCH INTERFACE
 

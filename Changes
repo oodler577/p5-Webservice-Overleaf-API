@@ -40,3 +40,18 @@ Revision history for Webservice::Overleaf::API.
 0.04 Tue Sep 8 08:56:00 2026
      - working on pre-reqs
      - fixed deps install on MSYS2 (SSL/TLS stack for HTTP::Tiny)
+
+0.05 Tue Sep 8 09:56:00 2026
+     - documentation-focused release with a practical end-to-end overleaf
+       command-line walkthrough from browser-session setup through project
+       listing, source ZIP inspection, remote compilation, PDF retrieval and
+       viewing, build-artifact inspection, and Git workflows
+     - documented ~/.ol-session.txt usage, overleaf_session2 browser-cookie
+       acquisition, the current five-day session retention period, and the
+       distinction between browser-session and Git-token authentication
+     - documented how to distinguish project source files from compile
+       artifacts, find .tex files in the downloaded ZIP, and identify the
+       configured root TeX document from output.log
+     - expanded Webservice::Overleaf::API POD with the major CLI workflow
+       highlights and rebuilt README.md as a practical combined guide to the
+       module API and overleaf client
