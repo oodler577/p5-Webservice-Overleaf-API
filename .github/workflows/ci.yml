@@ -77,7 +77,7 @@ jobs:
             -coverage pod
           )
 
-          cover -silent -report text "${COVER_ARGS[@]}" | tee coverage.txt
+          cover -silent -report text "${COVER_ARGS[@]}" 2>&1 | tee coverage.txt
 
           if ! awk '
             $1 == "lib/Webservice/Overleaf/API.pm" {
