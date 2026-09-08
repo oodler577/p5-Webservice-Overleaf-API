@@ -30,7 +30,7 @@ jobs:
         run: >-
           cpanm --notest
           Dispatch::Fu Util::H2O::More
-          HTTP::Tiny JSON::PP URI::Escape MIME::Base64 HTML::Entities
+          HTTP::Tiny JSON::PP URI::Escape MIME::Base64 HTML::Entities Pod::Usage
           Test::More File::Temp File::Spec
 
       - name: Run tests

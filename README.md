@@ -40,6 +40,32 @@ $ol->download_output($compile, 'output.log', to => 'output.log');
 
 `OVERLEAF_SESSION` is a browser authentication credential. Treat it like a password: do not commit it, print it, or put it in command-line arguments.
 
+
+## Command-line client
+
+The distribution includes the `overleaf` modulino in `bin/overleaf`.
+
+```sh
+overleaf --help
+overleaf --version
+
+overleaf project-url PROJECT_ID
+overleaf git-url PROJECT_ID
+overleaf clone PROJECT_ID paper
+overleaf open-uri --engine lualatex --main-document main.tex https://example.org/paper.zip
+
+export OVERLEAF_SESSION='...'
+overleaf --experimental projects
+overleaf --experimental --resource-path main.tex compile PROJECT_ID
+overleaf --experimental --resource-path main.tex --output paper.pdf pdf PROJECT_ID
+overleaf --experimental --output output.log output PROJECT_ID output.log
+```
+
+The CLI uses `Util::H2O::More::Getopt2h2o` for options and `Dispatch::Fu`
+for command dispatch. Git authentication remains with Git's credential
+handling. Experimental web-application operations use `OVERLEAF_SESSION`,
+`--session-file`, or `--session`.
+
 ## Development
 
 ```sh
@@ -60,5 +86,5 @@ Same terms as Perl itself.
 
 The test suite is network-hermetic: Overleaf HTTP traffic and Git operations are
 mocked where external access would otherwise be required. GitHub Actions tests
-Perl 5.10, 5.20, 5.30, 5.40, and 5.44 and has a dedicated Devel::Cover gate
-requiring complete statement, branch, condition, subroutine, and POD coverage for `lib/Webservice/Overleaf/API.pm`.
+Perl 5.10, 5.20, 5.30, 5.40, and 5.44. Dist::Zilla remains part of the local
+development/release workflow but is not used by CI.
