@@ -4,7 +4,11 @@ use v5.10;
 use strict;
 use warnings;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
+
+# General-purpose Overleaf tooling, also informed by practical Science Perl
+# Journal author/editor work.  The author is a Science Perl Committee member
+# and a Co-Editor of the Journal; see the POD for context and links.
 
 use Carp qw/croak/;
 use Dispatch::Fu qw/dispatch on xdefault xshift_and_deref/;
@@ -153,11 +157,15 @@ sub git_pull {
 }
 
 sub git_push {
-    my ($self, $directory) = @_;
+    my ($self, $directory, @args) = @_;
     croak 'git_push requires a repository directory'
       if !defined($directory) || $directory eq q{};
 
-    return $self->_run_git('git', '-C', $directory, 'push');
+    # Optional arguments deliberately map directly to `git push` arguments.
+    # The high-level CLI compile workflow uses this to push the complete
+    # committed project (HEAD:master) through the Git bridge.  It does not
+    # upload selected .tex/.bib files or use the ZIP export as a work tree.
+    return $self->_run_git('git', '-C', $directory, 'push', @args);
 }
 
 sub git_remote_add {
@@ -755,6 +763,11 @@ Run Git using list-form C<system>, avoiding shell interpolation.  Authentication
 is intentionally left to Git's credential mechanism; this module does not put
 Overleaf Git authentication tokens on the command line or in remote URLs.
 
+C<git_push($directory)> retains the ordinary C<git push> behavior.  Additional
+arguments are passed to C<git push>, which lets the command-line client use an
+explicit Overleaf remote and C<HEAD:master> refspec for its higher-level local
+compile workflow.
+
 =head1 AUTHENTICATION
 
 There are two distinct authentication paths because this module uses two
@@ -936,13 +949,41 @@ A project ZIP is the easiest way to inspect the source tree:
     unzip -l project.zip
     unzip -l project.zip | grep -Ei '\.tex$'
 
-The C<compile> command is different: it lists B<build artifacts>, not source
-files.  It prints the compilation status, PDF URL, and generated files such as
-C<output.log>, C<output.bbl>, C<output.chktex>, and C<output.pdf>:
+There are two useful C<compile> forms.  The low-level remote form compiles
+whatever is already present in an Overleaf project and lists B<build
+artifacts>, not source files:
 
     overleaf --experimental \
         --session-file "$SESSION" \
         compile "$ID"
+
+The higher-level local form is intended for ordinary work in an Overleaf Git
+checkout.  It discovers the project ID from the Git remote, requires a clean
+work tree, pushes the complete committed project to Overleaf, compiles the
+requested root document, and downloads the resulting PDF:
+
+    cd my-paper
+    git add .
+    git commit -m 'revise paper'
+
+    overleaf --experimental \
+        --session-file "$SESSION" \
+        compile main.tex
+
+This writes F<main.pdf> by default.  Omitting C<main.tex> uses Overleaf's
+configured root and names the PDF from the repository directory.  C<--output>
+selects a different local filename, and C<--no-push> deliberately compiles the
+existing remote project without synchronizing the local checkout.
+
+The local form treats the Git repository as the working project.  It does not
+try to select only C<.tex> or C<.bib> files: LaTeX builds may depend on style
+files, classes, images, generated sources, or other tracked resources.  The
+project ZIP remains an export/snapshot used for inspection and backup, not an
+editable staging mechanism.
+
+The low-level C<compile PROJECT_ID> form prints the compilation status, PDF
+URL, and generated files such as C<output.log>, C<output.bbl>,
+C<output.chktex>, and C<output.pdf>.
 
 A useful way to discover the root TeX document used by Overleaf is to retrieve
 the compilation log and inspect its initial C<**filename.tex> line:
@@ -1038,9 +1079,41 @@ L<https://www.overleaf.com/learn/how-to/Git_integration>,
 L<https://www.overleaf.com/legal>,
 L<https://github.com/aloth/olcli>
 
+=head1 SCIENCE PERL CONTEXT
+
+This distribution is general-purpose, but part of its development grew out of
+a practical publishing need.  The author is a member of the Perl Community's
+Science Perl Committee and a Co-Editor of the Science Perl Journal, and the
+Git/Overleaf workflow supported here is useful for some of the ordinary work
+of preparing, reviewing, and editing LaTeX submissions.
+
+Nothing in this module is required in order to write for the Journal; it is
+simply tooling that may make an existing Overleaf and Git workflow more
+convenient.  Perl programmers doing scientific, engineering, or other
+technical work are welcome to learn more about the Science Perl Committee at:
+
+L<https://perlcommunity.org/science/>
+
+The Science Perl Journal can be read online at:
+
+L<https://science.perlcommunity.org/spj>
+
+Prospective authors can find the Journal's submission information at:
+
+L<https://science.perlcommunity.org/spj/about/submissions>
+
+Readers interested in a printed issue can follow the Journal's announcements
+for current purchase information:
+
+L<https://science.perlcommunity.org/spj/announcement>
+
 =head1 AUTHOR
 
 Brett Estrade L<< <oodler@cpan.org> >>
+
+Member, Perl Community Science Perl Committee.
+
+Co-Editor, Science Perl Journal.
 
 =head1 LICENSE AND COPYRIGHT
 

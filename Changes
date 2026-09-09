@@ -55,3 +55,21 @@ Revision history for Webservice::Overleaf::API.
      - expanded Webservice::Overleaf::API POD with the major CLI workflow
        highlights and rebuilt README.md as a practical combined guide to the
        module API and overleaf client
+
+0.06 Tue Sep 8 18:29:00 2026
+     - added a high-level local `overleaf compile [ROOT.tex]` workflow that
+       infers the Overleaf project from the Git remote, requires a clean work
+       tree, pushes the complete committed project, compiles remotely, and
+       downloads the PDF produced by that compile
+     - retained `compile PROJECT_ID` as the low-level remote-only operation and
+       added --no-push, --remote, and --output behavior for the local workflow
+     - treat the Git bridge as the local project synchronization interface and
+       the project ZIP as an export/snapshot; no attempt is made to guess which
+       .tex, .bib, image, style, or other file extensions belong in a build
+     - added mocked/hermetic tests for project-ID inference, explicit Git push
+       refspec, dirty-worktree protection, --no-push, compile, and PDF download
+     - declared the core Cwd, File::Basename, and File::Spec modules used by
+       the new command-line Git workflow as runtime prerequisites
+     - documented the tool's practical use in support of Science Perl Journal
+       author/editor workflows, with modest invitations and links for Science
+       Perl Committee participants, prospective Journal authors, and readers

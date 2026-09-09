@@ -24,6 +24,10 @@ is_deeply $commands[-1], [qw/git -C paper pull/], 'pull command';
 ok $ol->git_push('paper'), 'push succeeds';
 is_deeply $commands[-1], [qw/git -C paper push/], 'push command';
 
+ok $ol->git_push('paper', 'overleaf', 'HEAD:master'), 'explicit push succeeds';
+is_deeply $commands[-1], [qw/git -C paper push overleaf HEAD:master/],
+    'push accepts explicit remote and refspec';
+
 ok $ol->git_remote_add('paper', 'abc123'), 'remote add succeeds';
 is_deeply $commands[-1], ['git', '-C', 'paper', 'remote', 'add', 'overleaf', 'https://git.overleaf.com/abc123'], 'remote add command';
 

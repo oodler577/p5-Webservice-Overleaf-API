@@ -10,6 +10,9 @@ binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
 
 use Carp qw/croak/;
+use Cwd qw/abs_path/;
+use File::Basename qw/basename/;
+use File::Spec;
 use HTML::Entities qw/encode_entities/;
 use Pod::Text;
 
@@ -48,6 +51,7 @@ sub _options {
             output        => undef,
             resource_path => undef,
             remote        => undef,
+            push           => 1,
         },
         qw/
             help|h
@@ -68,6 +72,7 @@ sub _options {
             output|o=s
             resource_path|resource-path=s
             remote=s
+            push!
         /;
 }
 
@@ -202,6 +207,207 @@ sub _text {
 
 sub _html_attr {
     return encode_entities(_text(shift), q{<>&"'});
+}
+
+sub _git_capture {
+    my @cmd = @_;
+
+    open my $fh, '-|', @cmd
+        or croak 'could not run git command: ' . join(' ', @cmd) . ": $!";
+    local $/;
+    my $output = <$fh>;
+    $output = q{} if !defined $output;
+    close $fh;
+
+    my $exit = $? == -1 ? 255 : ($? >> 8);
+    croak 'git command failed with exit status ' . $exit . ': ' . join(' ', @cmd)
+        if $exit;
+
+    $output =~ s/\r?\n\z//;
+    return $output;
+}
+
+sub _git_lines {
+    my @cmd = @_;
+    my $output = _git_capture(@cmd);
+    return grep { defined($_) && $_ ne q{} } split /\r?\n/, $output;
+}
+
+sub _overleaf_remote {
+    my ($Client, $directory, $requested) = @_;
+    my @remotes = _git_lines('git', '-C', $directory, 'remote');
+
+    croak 'no Git remotes are configured for this repository'
+        if !@remotes;
+
+    if (defined($requested) && $requested ne q{}) {
+        croak "Git remote '$requested' does not exist"
+            if !grep { $_ eq $requested } @remotes;
+        @remotes = ($requested);
+    }
+    elsif (grep { $_ eq 'overleaf' } @remotes) {
+        # Prefer an explicitly named overleaf remote, but still validate its URL
+        # below before using it as a project identifier.
+        @remotes = ('overleaf');
+    }
+
+    my $base = $Client->git_base_url;
+    $base =~ s{/+$}{};
+
+    my @matches;
+    for my $remote (@remotes) {
+        my $url = _git_capture('git', '-C', $directory, 'remote', 'get-url', $remote);
+        next if !defined($url) || $url eq q{};
+
+        if ($url =~ m{\A\Q$base\E/([A-Za-z0-9_-]+)(?:\.git)?/?\z}) {
+            push @matches, [ $remote, $1, $url ];
+        }
+    }
+
+    if (!@matches) {
+        my $which = defined($requested) && $requested ne q{}
+            ? "Git remote '$requested'"
+            : 'no configured Git remote';
+        croak "$which points at " . $Client->git_base_url . '/PROJECT_ID';
+    }
+
+    croak 'multiple Overleaf Git remotes found; select one with --remote NAME'
+        if @matches > 1;
+
+    return @{ $matches[0] };
+}
+
+sub _local_root_resource {
+    my ($repo_root, $filename) = @_;
+    return if !defined($filename) || $filename eq q{};
+
+    my $absolute = abs_path($filename);
+    croak "root TeX file '$filename' does not exist"
+        if !defined $absolute || !-f $absolute;
+
+    my $relative = File::Spec->abs2rel($absolute, $repo_root);
+    croak "root TeX file '$filename' is outside the Git repository"
+        if $relative eq '..' || $relative =~ m{\A\.\.[\\/]};
+
+    # Overleaf resource paths use forward slashes even when the local work tree
+    # is accessed from MSYS2/Windows.
+    $relative =~ s{\\}{/}g;
+    $relative =~ s{\A\./}{};
+    return $relative;
+}
+
+sub _local_pdf_name {
+    my ($repo_root, $resource_path) = @_;
+
+    if (defined($resource_path) && $resource_path ne q{}) {
+        my $name = _leaf($resource_path);
+        $name =~ s/\.tex\z/.pdf/i;
+        return $name if $name ne _leaf($resource_path);
+        return $name . '.pdf';
+    }
+
+    return basename($repo_root) . '.pdf';
+}
+
+sub _looks_like_local_compile {
+    my $ARGV = shift;
+    return 1 if !@$ARGV;
+
+    my $arg = $ARGV->[0];
+    return 1 if defined($arg) && ($arg eq '.' || $arg =~ /\.tex\z/i || -f $arg);
+    return 0;
+}
+
+# This remains general-purpose tooling.  The higher-level workflow was also
+# shaped by practical Git/Overleaf work used with Science Perl Journal authors
+# and editors.  The author is a Science Perl Committee member and SPJ
+# Co-Editor; see the POD for context and links.
+sub _compile_local_project {
+    my ($Client, $ARGV, $o) = @_;
+
+    my $root_arg = shift @$ARGV;
+    $root_arg = undef if defined($root_arg) && $root_arg eq '.';
+    croak 'local compile accepts at most one root TeX file'
+        if @$ARGV;
+
+    my $repo_root = _git_capture('git', 'rev-parse', '--show-toplevel');
+    croak 'could not determine the Git repository root' if $repo_root eq q{};
+    $repo_root = abs_path($repo_root) || $repo_root;
+
+    my ($remote, $project_id) = _overleaf_remote(
+        $Client,
+        $repo_root,
+        $o->remote,
+    );
+
+    if (!defined($root_arg) && defined($o->resource_path)) {
+        $root_arg = $o->resource_path;
+    }
+    elsif (defined($root_arg) && defined($o->resource_path)
+        && $root_arg ne $o->resource_path) {
+        croak 'specify the local root document either positionally or with '
+            . '--resource-path, not both';
+    }
+
+    my $resource_path = _local_root_resource($repo_root, $root_arg);
+
+    if ($o->push) {
+        if (defined $resource_path) {
+            my $tracked = _git_capture(
+                'git', '-C', $repo_root, 'ls-files', '--', $resource_path
+            );
+            croak "root TeX file '$resource_path' is not tracked by Git"
+                if $tracked eq q{};
+        }
+
+        my $dirty = _git_capture('git', '-C', $repo_root, 'status', '--porcelain');
+        if ($dirty ne q{}) {
+            my @changes = split /\r?\n/, $dirty;
+            @changes = @changes[0 .. 19] if @changes > 20;
+            croak "local repository has uncommitted changes; commit or stash "
+                . "them before compiling:\n  " . join("\n  ", @changes)
+                . "\n(use --no-push to compile the existing remote project)";
+        }
+
+        say join "\t", 'project', $project_id;
+        say join "\t", 'remote',  $remote;
+        say join "\t", 'root',    $resource_path
+            if defined $resource_path;
+        say join "\t", 'source',  'committed HEAD';
+
+        # The Git bridge is the canonical local synchronization interface.
+        # Push the complete committed project, not a selected set of .tex/.bib
+        # files.  The project ZIP remains an export/snapshot and is not used as
+        # an editable staging area for this workflow.
+        $Client->git_push($repo_root, $remote, 'HEAD:master');
+        say join "\t", 'push', 'ok';
+    }
+    else {
+        say join "\t", 'project', $project_id;
+        say join "\t", 'remote',  $remote;
+        say join "\t", 'root',    $resource_path
+            if defined $resource_path;
+        say join "\t", 'source',  'existing Overleaf project (--no-push)';
+    }
+
+    my %compile_opts;
+    $compile_opts{resource_path} = $resource_path
+        if defined $resource_path;
+
+    my $result = $Client->compile($project_id, %compile_opts);
+    my $to = defined($o->output)
+        ? $o->output
+        : _local_pdf_name($repo_root, $resource_path);
+
+    my $saved = $Client->download_pdf(
+        $project_id,
+        compile => $result,
+        to      => $to,
+    );
+
+    say join "\t", 'status', _text($result->status);
+    say join "\t", 'saved',  $saved;
+    return EXIT_SUCCESS;
 }
 
 sub _print_usage {
@@ -365,6 +571,14 @@ sub do_project_zip {
 
 sub do_compile {
     my ($Client, $command, $ARGV, $o) = xshift_and_deref @_;
+
+    # `compile PROJECT_ID` remains the low-level remote operation from earlier
+    # releases.  `compile [ROOT.tex]` from a Git work tree is the higher-level
+    # 0.06 workflow: push the committed project, compile once, and download the
+    # PDF produced by that exact compile.
+    return _compile_local_project($Client, $ARGV, $o)
+        if _looks_like_local_compile($ARGV);
+
     my $project_id = _require_arg($ARGV, 'project id');
     my %opts = _compile_options($o);
 
@@ -516,6 +730,8 @@ overleaf - command-line client for Webservice::Overleaf::API
   overleaf --experimental bootstrap
   overleaf --experimental zip PROJECT_ID
   overleaf --experimental compile PROJECT_ID
+  overleaf --experimental --session-file ~/.ol-session.txt compile
+  overleaf --experimental --session-file ~/.ol-session.txt compile main.tex
   overleaf --experimental pdf PROJECT_ID
   overleaf --experimental output PROJECT_ID output.log
 
@@ -617,12 +833,54 @@ Requires C<--experimental> and a browser-session credential.
 
 =head2 compile PROJECT_ID
 
-Trigger an Overleaf compile and print the resulting status, PDF URL, and
-reported compile outputs as tab-separated records.
+Trigger a low-level Overleaf compile of the named remote project and print the
+resulting status, PDF URL, and reported compile outputs as tab-separated
+records.  This is the behavior provided by earlier releases.
 
 Use C<--resource-path FILE> to request a specific root resource.
 
-Requires C<--experimental> and a browser-session credential.
+=head2 compile [ROOT.tex]
+
+When invoked from inside a local Git checkout connected to an Overleaf Git
+remote, C<compile> also has a higher-level project workflow:
+
+  overleaf --experimental \
+      --session-file ~/.ol-session.txt \
+      compile main.tex
+
+The client finds the repository root, discovers the Overleaf project ID from
+the Git remote, verifies that the work tree is clean, pushes the complete
+committed project to the Overleaf Git bridge as C<HEAD:master>, remotely
+compiles C<main.tex>, and downloads the PDF as F<main.pdf>.
+
+Omit ROOT.tex to use the root document configured on Overleaf:
+
+  overleaf --experimental \
+      --session-file ~/.ol-session.txt \
+      compile
+
+In that case the default local PDF name is based on the repository directory.
+C<--output FILE> always overrides the local PDF filename.
+
+This workflow intentionally synchronizes the B<Git project>, not selected file
+extensions.  A TeX root may depend on C<.tex>, C<.bib>, C<.sty>, C<.cls>, image,
+source-code, or other project files.  The project ZIP is an export/snapshot and
+is not used as the editable source for this operation.
+
+By default a dirty work tree is rejected rather than silently committing or
+omitting local work, and an explicitly requested root must be tracked by Git.
+If Overleaf has newer web-editor changes and Git rejects the push as
+non-fast-forward, pull and reconcile them normally; C<overleaf> deliberately
+does not rewrite or merge the local history.  C<--no-push> skips
+synchronization and compiles the existing Overleaf project state while still
+using the Git remote to discover the project ID.
+
+Use C<--remote NAME> if more than one Overleaf Git remote is configured or if a
+specific remote should be selected.
+
+Both forms require C<--experimental> and a browser-session credential for the
+compile/download phase.  The push phase separately uses Git's normal Overleaf
+Git token/credential handling.
 
 =head2 pdf PROJECT_ID
 
@@ -747,7 +1005,8 @@ Set the MIME type used by C<open-data>.
 
 =head2 -o FILE, --output FILE
 
-Set the local output filename for C<zip>, C<pdf>, or C<output>.
+Set the local output filename for C<zip>, C<pdf>, C<output>, or the
+higher-level local C<compile [ROOT.tex]> workflow.
 
 =head2 --resource-path FILE
 
@@ -755,7 +1014,14 @@ Request a specific root resource for C<compile>, C<pdf>, or C<output>.
 
 =head2 --remote NAME
 
-Set the remote name used by C<remote-add>.
+Set the remote name used by C<remote-add>, or select the Overleaf Git
+remote used by local C<compile [ROOT.tex]>.
+
+=head2 --push, --no-push
+
+Local C<compile [ROOT.tex]> pushes the clean committed Git project to
+Overleaf by default.  C<--no-push> skips synchronization and compiles
+the project state already present on Overleaf.
 
 =head1 AUTHENTICATION
 
@@ -814,7 +1080,7 @@ For the current working-directory style:
   printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > ~/.ol-session.txt
   chmod 600 ~/.ol-session.txt
 
-The resulting F<session.out> is simply one line containing the cookie value.
+The resulting F<~/.ol-session.txt> is simply one line containing the cookie value.
 It is not JSON, not a Netscape cookie file, and not a C<name=value> pair.
 
 Authenticate a command with:
@@ -823,7 +1089,7 @@ Authenticate a command with:
 
 For a particular project:
 
-  overleaf --experimental --session-file ./session.out \
+  overleaf --experimental --session-file ~/.ol-session.txt \
       compile 672ba784883f09972c460cd6
 
 The same credential may instead be placed in the environment:
@@ -839,7 +1105,7 @@ visible in process listings and shell history.
 
 As of the Overleaf Cookie Policy last modified 5 August 2026,
 C<overleaf_session2> has a documented B<5-day retention period>.  In practical
-terms, treat F<session.out> as a short-lived credential and expect to copy a
+terms, treat F<~/.ol-session.txt> as a short-lived credential and expect to copy a
 fresh C<overleaf_session2> value from the browser about every five days when
 needed.
 
@@ -847,7 +1113,7 @@ The five-day period is not a promise that a particular copied value will remain
 valid for exactly five days.  Logging out, revocation, rotation, security
 changes, or other server-side invalidation may end the session earlier.  If an
 experimental command begins returning an authentication failure, log into
-Overleaf in the browser and replace F<session.out> with the current cookie
+Overleaf in the browser and replace F<~/.ol-session.txt> with the current cookie
 value.
 
 The current Overleaf cookie policy is published at
@@ -858,6 +1124,43 @@ L<https://www.overleaf.com/legal>.
 This section shows a complete shell workflow, beginning with browser
 authentication and ending with source inspection, remote compilation, PDF
 viewing, build-artifact retrieval, and Git interaction.
+
+The 0.06 local compile workflow joins the two useful interfaces together:
+Git synchronizes the source project, while the browser-session interface asks
+Overleaf to compile that synchronized project and returns the resulting PDF.
+The ZIP interface remains useful for export, backup, and inspection, but it is
+not the normal local editing transport.
+
+Once a project has been cloned through the Git bridge and the session file has
+been configured, the ordinary edit/build cycle is intentionally short:
+
+  cd my-paper
+  $EDITOR main.tex
+  git add .
+  git commit -m 'revise paper'
+
+  overleaf --experimental \
+      --session-file ~/.ol-session.txt \
+      compile main.tex
+
+A successful local compile reports the inferred project and remote, pushes the
+committed project, compiles once, and downloads F<main.pdf>:
+
+  project  0123456789abcdef
+  remote   origin
+  root     main.tex
+  source   committed HEAD
+  push     ok
+  status   success
+  saved    main.pdf
+
+On Windows/MSYS2:
+
+  start main.pdf
+
+On Linux:
+
+  xdg-open main.pdf >/dev/null 2>&1 &
 
 =head2 1. Obtain the browser session
 
@@ -1276,9 +1579,40 @@ Command-line options are parsed with C<Getopt2h2o> from
 L<Util::H2O::More>.  Commands are routed with L<Dispatch::Fu>.  The executable
 is a modulino whose package is C<local::bin::overleaf>.
 
+=head1 SCIENCE PERL JOURNAL WORKFLOW
+
+C<overleaf> is general-purpose tooling.  It was developed in part from the
+same practical Git, LaTeX, and Overleaf work used while helping authors and
+editors prepare material for the Science Perl Journal.  The author is a member
+of the Perl Community's Science Perl Committee and a Co-Editor of the Journal.
+
+The tool is not a submission requirement, and authors are free to use whatever
+LaTeX workflow serves their work well.  For Perl programmers who might enjoy
+sharing scientific, engineering, or other technical work, information about
+the Science Perl Committee is available at:
+
+L<https://perlcommunity.org/science/>
+
+The Science Perl Journal is available online at:
+
+L<https://science.perlcommunity.org/spj>
+
+Prospective authors may consult:
+
+L<https://science.perlcommunity.org/spj/about/submissions>
+
+Readers interested in printed issues can find current availability through the
+Journal's announcements:
+
+L<https://science.perlcommunity.org/spj/announcement>
+
 =head1 AUTHOR
 
 Brett Estrade <oodler@cpan.org>
+
+Member, Perl Community Science Perl Committee.
+
+Co-Editor, Science Perl Journal.
 
 =head1 LICENSE
 

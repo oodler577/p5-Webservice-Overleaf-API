@@ -13,6 +13,24 @@ The experimental operations use observable Overleaf web-application behavior
 rather than a documented stable public API, so they require explicit opt-in in
 the Perl API (`experimental => 1`) and in the CLI (`--experimental`).
 
+## Science Perl context
+
+This is general-purpose Overleaf tooling, but it grew in part from practical
+Git/LaTeX work used while helping authors and editors prepare material for the
+**Science Perl Journal**. The author, Brett Estrade (OODLER), is a member of the
+Perl Community's **Science Perl Committee** and a Co-Editor of the Journal.
+
+The tool is not required for Journal submissions; it is simply one convenient
+way to work. If you are doing scientific, engineering, or other technical work
+with Perl, you are welcome to learn more about the [Science Perl
+Committee](https://perlcommunity.org/science/). The [Science Perl
+Journal](https://science.perlcommunity.org/spj) can be read online, and its
+[submission information](https://science.perlcommunity.org/spj/about/submissions)
+is available for anyone considering an article. Readers interested in printed
+issues can follow the Journal's
+[announcements](https://science.perlcommunity.org/spj/announcement) for current
+availability.
+
 ## Installation
 
 From CPAN:
@@ -95,6 +113,110 @@ $ol->download_output(
 ```
 
 ## CLI: start-to-finish practical workflow
+
+### Local Git checkout -> Overleaf -> PDF
+
+The most useful 0.06 workflow treats the **Git checkout as the local working
+copy**, the browser-session interface as the **remote compiler/output
+interface**, and the ZIP as an **exported snapshot**.
+
+After cloning an Overleaf project through the Git bridge:
+
+```sh
+overleaf clone "$ID" my-paper
+cd my-paper
+```
+
+edit and commit the project normally:
+
+```sh
+$EDITOR main.tex
+git add .
+git commit -m 'revise paper'
+```
+
+Then one command can synchronize the committed project, compile it on
+Overleaf, and download the PDF:
+
+```sh
+overleaf --experimental \
+  --session-file ~/.ol-session.txt \
+  compile main.tex
+```
+
+Typical concise output is:
+
+```text
+project  0123456789abcdef
+remote   origin
+root     main.tex
+source   committed HEAD
+push     ok
+status   success
+saved    main.pdf
+```
+
+The command discovers the project ID from the Overleaf Git remote and pushes
+**the complete committed project** to the remote `master` branch. It does not
+try to guess whether only `.tex`, `.bib`, images, styles, classes, or some other
+file type is needed. A TeX project is the compilation unit.
+
+A dirty work tree is rejected. The client will not silently `git add`, create a
+commit, or leave files out of the build. Commit or stash your changes first.
+The selected root document must also be tracked by Git. If Overleaf has newer
+web-editor changes and the push is rejected as non-fast-forward, pull and
+reconcile those changes normally; the client deliberately does not modify your
+local history for you.
+
+If you deliberately want to compile the project state already on Overleaf:
+
+```sh
+overleaf --experimental \
+  --session-file ~/.ol-session.txt \
+  --no-push \
+  compile main.tex
+```
+
+Omit the root filename to use the document configured on Overleaf:
+
+```sh
+overleaf --experimental \
+  --session-file ~/.ol-session.txt \
+  compile
+```
+
+Use `--output` to choose the PDF name:
+
+```sh
+overleaf --experimental \
+  --session-file ~/.ol-session.txt \
+  --output reviewed-draft.pdf \
+  compile main.tex
+```
+
+View the downloaded PDF on Linux:
+
+```sh
+xdg-open main.pdf >/dev/null 2>&1 &
+```
+
+or from MSYS2/Git Bash on Windows:
+
+```sh
+start main.pdf
+```
+
+The lower-level form remains available when you want to compile whatever is
+already on Overleaf without using a local Git checkout:
+
+```sh
+overleaf --experimental \
+  --session-file "$SESSION" \
+  compile "$ID"
+```
+
+That form prints the compile status, PDF URL, and build-artifact list; use the
+`pdf` command to download its PDF separately.
 
 The following sequence is intended to be usable as a real working session.
 
