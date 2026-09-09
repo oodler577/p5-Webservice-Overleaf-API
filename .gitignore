@@ -6,7 +6,3 @@
 /.olauth
 *.secret
 *.secret.*
-*.zip
-*.out
-*.log
-*.pdf

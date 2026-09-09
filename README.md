@@ -112,6 +112,209 @@ $ol->download_output(
 );
 ```
 
+## Authentication and credential setup
+
+Overleaf exposes the two parts of this client's workflow through **two separate
+authentication systems**. They are deliberately kept separate in the CLI:
+
+| Overleaf surface | Credential | Used for |
+| --- | --- | --- |
+| Web application | `overleaf_session2` browser cookie | `bootstrap`, `projects`, ZIP, compile, PDF, build outputs |
+| Git bridge | Git authentication token, username `git` | clone, pull, push, source synchronization |
+
+A normal local `overleaf --experimental compile main.tex` can use **both**: the
+Git token synchronizes the committed project first, then the browser session
+runs the Overleaf compile and downloads the resulting PDF.
+
+The CLI standardizes private credentials under:
+
+```text
+~/.overleaf/session
+~/.overleaf/git-token
+```
+
+Create the directory once:
+
+```sh
+mkdir -p ~/.overleaf
+chmod 700 ~/.overleaf
+```
+
+### 1. Browser-session credential
+
+Log into <https://www.overleaf.com/> normally.
+
+**Firefox**
+
+1. Press `F12`.
+2. Open **Storage** → **Cookies** → `https://www.overleaf.com`.
+3. Find the cookie named `overleaf_session2`.
+4. Copy only its **Value**.
+
+**Chrome / Edge / Chromium**
+
+1. Press `F12`.
+2. Open **Application** → **Storage** → **Cookies**.
+3. Select `https://www.overleaf.com`.
+4. Find `overleaf_session2` and copy only its **Value**.
+
+Store only the cookie value—not `overleaf_session2=`:
+
+```sh
+read -rsp 'Paste overleaf_session2 value: ' OL_SESSION; printf '\n'
+printf '%s\n' "$OL_SESSION" > ~/.overleaf/session
+unset OL_SESSION
+chmod 600 ~/.overleaf/session
+```
+
+Test this authentication path by itself:
+
+```sh
+overleaf --experimental bootstrap
+overleaf --experimental projects
+```
+
+`bootstrap` should print `authenticated`.
+
+Overleaf's current Cookie Policy documents a five-day retention period for
+`overleaf_session2`. Logout, rotation, revocation, or other server-side changes
+can invalidate a copied value earlier; replace `~/.overleaf/session` with the
+current browser-cookie value when session authentication stops working.
+
+### 2. Git authentication token
+
+The Git bridge does **not** use the browser cookie and does not use your normal
+Overleaf password. It uses a Git authentication token.
+
+To create one:
+
+1. Open Overleaf **Account Settings**: <https://www.overleaf.com/user/settings>.
+2. Find **Git authentication tokens**.
+3. Choose **Generate token**.
+4. Copy the complete token when Overleaf displays it.
+
+Overleaf does not reveal the complete token later. If you lose the value,
+generate a new token and remove the old one if it is no longer needed.
+
+On first use of Git for a project, Overleaf can also offer token generation from
+the project: **Integrations** → **Git** → **Generate token**.
+
+For Git authentication:
+
+```text
+username: git
+password: <your Git authentication token>
+```
+
+The same personal token can be used across projects to which your account has
+Git access. Overleaf currently documents a one-year token expiration. Do not
+share a token with collaborators; each person should create their own.
+
+Store only the token value:
+
+```sh
+read -rsp 'Paste Overleaf Git token: ' OL_GIT_TOKEN; printf '\n'
+printf '%s\n' "$OL_GIT_TOKEN" > ~/.overleaf/git-token
+unset OL_GIT_TOKEN
+chmod 600 ~/.overleaf/git-token
+```
+
+Test the Git authentication path independently:
+
+```sh
+ID=0123456789abcdef
+overleaf clone "$ID" my-paper
+```
+
+When the token file is present, the client supplies username `git` and the token
+through a temporary `GIT_ASKPASS` helper; it does not place the token in the
+remote URL, `.git/config`, shell history, or Git process arguments.
+
+Overleaf's current token instructions are here:
+<https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration/git-integration-authentication-tokens>
+
+### Credential precedence
+
+Browser session:
+
+```text
+--session
+--session-file
+OVERLEAF_SESSION
+~/.overleaf/session
+```
+
+Git token:
+
+```text
+--git-token-file
+OVERLEAF_GIT_TOKEN
+~/.overleaf/git-token
+normal Git credential handling if none is configured
+```
+
+For ephemeral automation you may therefore use:
+
+```sh
+export OVERLEAF_SESSION='...'
+export OVERLEAF_GIT_TOKEN='...'
+```
+
+### File permissions and MSYS2
+
+The intended file mode is `0600`:
+
+```sh
+chmod 600 ~/.overleaf/session ~/.overleaf/git-token
+```
+
+On normal POSIX filesystems the client verifies and requires exactly `0600`.
+MSYS2 commonly uses Windows filesystems mounted with `noacl`, where `chmod 600`
+may succeed while Perl `stat()` still reports synthetic `0644`-style bits. The
+client detects when POSIX mode changes are not enforceable and does not reject a
+credential solely because of those synthetic mode bits. The files must still
+live under `~/.overleaf/` and should remain private to the owning Windows
+account/ACL.
+
+### Combined authentication workflow
+
+Once both standard files exist, ordinary commands need no credential flags:
+
+```sh
+ID=0123456789abcdef
+
+# Git token only
+overleaf clone "$ID" my-paper
+cd my-paper
+
+$EDITOR main.tex
+git add .
+git commit -m 'revise paper'
+
+# Git token: push committed project
+# Browser session: compile remotely and retrieve PDF
+overleaf --experimental compile main.tex
+
+# Windows / MSYS2
+start main.pdf
+
+# Linux
+xdg-open main.pdf >/dev/null 2>&1 &
+```
+
+A read-only test of the remote compiler skips Git synchronization and therefore
+needs only the browser session:
+
+```sh
+overleaf --experimental --no-push compile main.tex
+```
+
+If `clone`, `pull`, or the push phase fails with a Git `403` or token error,
+check the **Git token**. If `bootstrap`, `projects`, ZIP, compile, or PDF/output
+retrieval reports a web-session authentication failure, refresh the
+**`overleaf_session2` browser cookie**. Changing one credential does not repair
+the other authentication path.
+
 ## CLI: start-to-finish practical workflow
 
 ### Local Git checkout -> Overleaf -> PDF
@@ -140,7 +343,6 @@ Overleaf, and download the PDF:
 
 ```sh
 overleaf --experimental \
-  --session-file ~/.ol-session.txt \
   compile main.tex
 ```
 
@@ -149,6 +351,7 @@ Typical concise output is:
 ```text
 project  0123456789abcdef
 remote   origin
+branch   main
 root     main.tex
 source   committed HEAD
 push     ok
@@ -156,10 +359,14 @@ status   success
 saved    main.pdf
 ```
 
-The command discovers the project ID from the Overleaf Git remote and pushes
-**the complete committed project** to the remote `master` branch. It does not
-try to guess whether only `.tex`, `.bib`, images, styles, classes, or some other
+The command discovers the project ID and branch from the Overleaf Git checkout
+and pushes **the complete committed project** as `HEAD:<remote-branch>`. It does
+not guess whether only `.tex`, `.bib`, images, styles, classes, or some other
 file type is needed. A TeX project is the compilation unit.
+
+The branch is discovered from the current branch's upstream or the selected
+remote's recorded `HEAD`; the client does not assume `master` or `main`. Use
+`--remote-branch NAME` when local Git metadata is insufficient.
 
 A dirty work tree is rejected. The client will not silently `git add`, create a
 commit, or leave files out of the build. Commit or stash your changes first.
@@ -172,7 +379,6 @@ If you deliberately want to compile the project state already on Overleaf:
 
 ```sh
 overleaf --experimental \
-  --session-file ~/.ol-session.txt \
   --no-push \
   compile main.tex
 ```
@@ -181,7 +387,6 @@ Omit the root filename to use the document configured on Overleaf:
 
 ```sh
 overleaf --experimental \
-  --session-file ~/.ol-session.txt \
   compile
 ```
 
@@ -189,7 +394,6 @@ Use `--output` to choose the PDF name:
 
 ```sh
 overleaf --experimental \
-  --session-file ~/.ol-session.txt \
   --output reviewed-draft.pdf \
   compile main.tex
 ```
@@ -211,7 +415,6 @@ already on Overleaf without using a local Git checkout:
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   compile "$ID"
 ```
 
@@ -220,58 +423,16 @@ That form prints the compile status, PDF URL, and build-artifact list; use the
 
 The following sequence is intended to be usable as a real working session.
 
-### 1. Get the Overleaf browser session
+### 1. Configure credentials
 
-Log into `https://www.overleaf.com/` in your normal browser.
-
-**Firefox**
-
-1. Press `F12`.
-2. Open **Storage**.
-3. Open **Cookies** and select `https://www.overleaf.com`.
-4. Find `overleaf_session2`.
-5. Copy only its **Value**.
-
-**Chrome / Edge / Chromium**
-
-1. Press `F12`.
-2. Open **Application**.
-3. Under **Storage**, open **Cookies**.
-4. Select `https://www.overleaf.com`.
-5. Find `overleaf_session2` and copy only its **Value**.
-
-Create a session file containing only that value:
-
-```sh
-printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > ~/.ol-session.txt
-chmod 600 ~/.ol-session.txt
-```
-
-Do **not** put this in the file:
-
-```text
-overleaf_session2=...
-```
-
-The file is one line containing only the cookie value.
-
-For subsequent commands:
-
-```sh
-SESSION=~/.ol-session.txt
-```
-
-Overleaf's Cookie Policy currently documents a **5-day retention period** for
-`overleaf_session2`. Treat that as an approximate lifetime: logout, rotation,
-revocation, or server-side invalidation can end a particular session sooner.
-When commands begin failing authentication, copy a fresh cookie value from the
-browser.
+Follow [Credential setup](#credential-setup) above. Once
+`~/.overleaf/session` and `~/.overleaf/git-token` are present with mode `0600`,
+the client discovers them automatically.
 
 ### 2. Validate authentication
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   bootstrap
 ```
 
@@ -285,7 +446,6 @@ authenticated
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   projects
 ```
 
@@ -314,7 +474,6 @@ Download the project ZIP:
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   --output project.zip \
   zip "$ID"
 ```
@@ -356,7 +515,6 @@ Compile using the root document currently configured by Overleaf:
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   compile "$ID"
 ```
 
@@ -388,7 +546,6 @@ Retrieve the compilation log:
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   --output output.log \
   output "$ID" output.log
 ```
@@ -415,7 +572,6 @@ ROOT_TEX=user_guide.tex
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   --resource-path "$ROOT_TEX" \
   compile "$ID"
 ```
@@ -427,7 +583,6 @@ document.
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   --resource-path "$ROOT_TEX" \
   --output document.pdf \
   pdf "$ID"
@@ -464,17 +619,14 @@ The `output` command performs a compile and downloads one reported artifact:
 
 ```sh
 overleaf --experimental \
-  --session-file "$SESSION" \
   --output document.log \
   output "$ID" output.log
 
 overleaf --experimental \
-  --session-file "$SESSION" \
   --output document.bbl \
   output "$ID" output.bbl
 
 overleaf --experimental \
-  --session-file "$SESSION" \
   --output document.chktex \
   output "$ID" output.chktex
 ```
@@ -492,7 +644,7 @@ Only artifacts returned by the Overleaf compile can be downloaded this way.
 ## Git integration
 
 The Git bridge is separate from the browser-session interface. It does not use
-`~/.ol-session.txt`.
+`~/.overleaf/session`.
 
 Overleaf's Git integration uses token-based Git authentication and is currently
 a premium feature on Overleaf Cloud. Let Git handle and store the credential
@@ -553,20 +705,25 @@ git remote -v
 ```
 
 Overleaf's Git bridge is not a full general-purpose Git server. It presents one
-linear project history and the remote branch is currently named `master`.
-Overleaf's documented setup for an unrelated existing repository includes
-reconciling the histories before the first push. Once prepared, an explicit
-push is typically:
+linear project history. Branch names seen in repositories and documentation may
+differ, so the high-level `compile` workflow follows the branch actually
+tracked/advertised by the selected remote rather than assuming `master` or
+`main`.
+
+Inspect an existing remote with:
 
 ```sh
-git push overleaf master --set-upstream
+git remote show overleaf
 ```
 
-A differently named local branch can be mapped to Overleaf's branch:
+If branch discovery is unavailable locally, specify it explicitly:
 
 ```sh
-git push overleaf my-branch:master
+overleaf --remote-branch main --experimental compile main.tex
 ```
+
+For an unrelated existing repository, reconcile histories according to
+Overleaf's current Git integration instructions before the first push.
 
 The Git bridge creates commits as needed when Git fetch/pull/push operations
 translate between Overleaf's internal History system and Git.

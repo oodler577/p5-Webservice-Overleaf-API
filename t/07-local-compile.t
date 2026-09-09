@@ -13,6 +13,7 @@ ok $loaded, 'loaded overleaf modulino'
     package Local::CompileOptions;
     sub new { bless { @_ > 1 ? @_[1 .. $#_] : () }, $_[0] }
     sub remote { $_[0]->{remote} }
+    sub remote_branch { $_[0]->{remote_branch} }
     sub output        { $_[0]->{output} }
     sub resource_path { $_[0]->{resource_path} }
     sub push          { exists $_[0]->{push} ? $_[0]->{push} : 1 }
@@ -78,8 +79,10 @@ my @git_calls;
         my $joined = join q{ }, @cmd;
         return $tmp if $joined eq 'git rev-parse --show-toplevel';
         return 'origin' if $joined eq "git -C $tmp remote";
-        return 'https://git.overleaf.com/abc123'
+        return 'https://git@git.overleaf.com/abc123'
             if $joined eq "git -C $tmp remote get-url origin";
+        return 'origin/main'
+            if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
         return 'main.tex' if $joined eq "git -C $tmp ls-files -- main.tex";
         return q{} if $joined eq "git -C $tmp status --porcelain";
         die "unexpected git command: $joined";
@@ -94,14 +97,15 @@ my @git_calls;
     is $err, q{}, 'local compile has no stderr';
     like $out, qr/^project\tabc123$/m, 'project id inferred from Git remote';
     like $out, qr/^remote\torigin$/m, 'remote reported';
+    like $out, qr/^branch\tmain$/m, 'remote branch reported';
     like $out, qr/^root\tmain\.tex$/m, 'root resource reported';
     like $out, qr/^push\tok$/m, 'push reported';
     like $out, qr/^status\tsuccess$/m, 'compile status reported';
     like $out, qr/^saved\tmain\.pdf$/m, 'PDF filename derived from TeX root';
 
     is_deeply $client->{calls}[0],
-        [ push => $tmp, 'origin', 'HEAD:master' ],
-        'complete committed project pushed to Overleaf master';
+        [ push => $tmp, 'origin', 'HEAD:main' ],
+        'complete committed project pushed to discovered Overleaf branch';
     is_deeply $client->{calls}[1],
         [ compile => 'abc123', resource_path => 'main.tex' ],
         'remote compile uses inferred project and root resource';
@@ -122,6 +126,10 @@ my @git_calls;
             if $joined eq "git -C $tmp remote get-url origin";
         return 'https://git.overleaf.com/def456'
             if $joined eq "git -C $tmp remote get-url overleaf";
+        return 'origin/main'
+            if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
+        return 'overleaf/main'
+            if $joined eq "git -C $tmp symbolic-ref --quiet --short refs/remotes/overleaf/HEAD";
         return 'main.tex' if $joined eq "git -C $tmp ls-files -- main.tex";
         return ' M main.tex' if $joined eq "git -C $tmp status --porcelain";
         die "unexpected git command: $joined";
@@ -145,6 +153,8 @@ my @git_calls;
         return 'origin' if $joined eq "git -C $tmp remote";
         return 'https://git.overleaf.com/abc123'
             if $joined eq "git -C $tmp remote get-url origin";
+        return 'origin/main'
+            if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
         die "status should not be queried with --no-push"
             if $joined eq "git -C $tmp status --porcelain";
         die "unexpected git command: $joined";
@@ -174,12 +184,14 @@ ok !local::bin::overleaf::_looks_like_local_compile(['abc123']),
     my @argv = (
         '--no-push',
         '--remote', 'overleaf',
+        '--remote-branch', 'main',
         '--output', 'review.pdf',
         'compile', 'main.tex',
     );
     my $o = local::bin::overleaf::_options(\@argv);
     ok !$o->push, '--no-push is parsed';
     is $o->remote, 'overleaf', '--remote is parsed for local compile';
+    is $o->remote_branch, 'main', '--remote-branch is parsed';
     is $o->output, 'review.pdf', '--output is parsed for local compile';
     is_deeply \@argv, [ 'compile', 'main.tex' ],
         'local compile command and root remain after option parsing';
@@ -190,6 +202,28 @@ ok !local::bin::overleaf::_looks_like_local_compile(['abc123']),
     my $o = local::bin::overleaf::_options(\@argv);
     ok $o->push, 'local compile pushes by default';
 }
+
+{
+    no warnings 'redefine';
+    local *local::bin::overleaf::_git_capture = sub {
+        my @cmd = @_;
+        my $joined = join q{ }, @cmd;
+        return 'origin/main'
+            if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
+        die "unexpected git command: $joined";
+    };
+    is local::bin::overleaf::_overleaf_remote_branch($tmp, 'origin', undef),
+        'main', 'branch discovered from upstream';
+}
+
+is local::bin::overleaf::_overleaf_remote_branch($tmp, 'origin', 'main'),
+    'main', 'explicit branch override accepted';
+my $bad_branch = eval {
+    local::bin::overleaf::_overleaf_remote_branch($tmp, 'origin', '../bad');
+    1;
+};
+ok !$bad_branch, 'unsafe branch override rejected';
+like $@, qr/invalid remote branch/, 'unsafe branch diagnostic';
 
 chdir $old or die $!;
 

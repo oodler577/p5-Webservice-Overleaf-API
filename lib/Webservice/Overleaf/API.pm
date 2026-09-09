@@ -163,8 +163,9 @@ sub git_push {
 
     # Optional arguments deliberately map directly to `git push` arguments.
     # The high-level CLI compile workflow uses this to push the complete
-    # committed project (HEAD:master) through the Git bridge.  It does not
-    # upload selected .tex/.bib files or use the ZIP export as a work tree.
+    # committed project to the branch discovered from the Overleaf Git remote.
+    # It does not upload selected .tex/.bib files or use the ZIP export as a
+    # work tree.
     return $self->_run_git('git', '-C', $directory, 'push', @args);
 }
 
@@ -759,64 +760,89 @@ Returns the Git bridge URL for a project.
 
 =head2 git_clone, git_pull, git_push, git_remote_add
 
-Run Git using list-form C<system>, avoiding shell interpolation.  Authentication
-is intentionally left to Git's credential mechanism; this module does not put
-Overleaf Git authentication tokens on the command line or in remote URLs.
+Run Git using list-form C<system>, avoiding shell interpolation.  Direct module
+use leaves authentication to Git or to a caller-supplied C<git_runner>; the
+module does not put Overleaf Git authentication tokens on the command line or
+in remote URLs.  The bundled C<overleaf> CLI can supply its standardized token
+through a temporary C<GIT_ASKPASS> helper.
 
 C<git_push($directory)> retains the ordinary C<git push> behavior.  Additional
 arguments are passed to C<git push>, which lets the command-line client use an
-explicit Overleaf remote and C<HEAD:master> refspec for its higher-level local
-compile workflow.
+explicit Overleaf remote and the remote's discovered default/tracking branch
+for its higher-level local compile workflow.
 
 =head1 AUTHENTICATION
 
-There are two distinct authentication paths because this module uses two
-separate Overleaf integration surfaces.
+Overleaf divides the functionality used by this distribution across two
+separate authentication systems.  They are not interchangeable:
+
+=over 4
+
+=item *
+
+The official Git bridge uses a B<Git authentication token>.  The username is
+C<git> and the token is the password.  Create tokens in Overleaf Account
+Settings under B<Git authentication tokens>; Overleaf also offers token
+generation from a project's B<Integrations -> Git> dialog.
+
+=item *
+
+The experimental project-listing, ZIP, compile, PDF, and build-output methods
+use the B<C<overleaf_session2>> cookie from an already authenticated browser
+session.
+
+=back
+
+The bundled C<overleaf> CLI standardizes these credentials as:
+
+  ~/.overleaf/session
+  ~/.overleaf/git-token
+
+and also supports C<OVERLEAF_SESSION> and C<OVERLEAF_GIT_TOKEN>.  Run:
+
+  overleaf --help
+
+for the complete step-by-step setup, credential precedence, permission rules,
+independent authentication tests, and the combined Git-push -> Overleaf-compile
+-> PDF-download workflow.
 
 =head2 Official Git bridge
 
-Git operations use the official Overleaf Git bridge.  For Overleaf Cloud,
-create a Git authentication token in the Overleaf account settings under Git
-Integration and let Git use that token as the password for the C<git> user.
-The same token can be used for the projects accessible to that Overleaf
-account.
+For Overleaf Cloud, create a Git authentication token at:
 
-This module deliberately leaves credential storage to Git.  Use a Git
-credential helper rather than embedding the token in a remote URL or passing it
-on a command line.
+L<https://www.overleaf.com/user/settings>
+
+under B<Git authentication tokens>, then choose B<Generate token> and copy the
+complete value when it is displayed.  Overleaf does not display the whole token
+again later; generate a new one if the original value is lost.  The first use
+of a project's B<Integrations -> Git> dialog can also offer B<Generate token>.
+
+Git uses C<git> as the username and the token as the password.  The same token
+can be used across the projects accessible to that account; Overleaf currently
+documents a one-year expiration period.  Each collaborator should use their
+own token.
+
+Direct module use leaves credential storage to Git or to the caller's
+C<git_runner>.  The bundled CLI additionally supports F<~/.overleaf/git-token>
+and C<OVERLEAF_GIT_TOKEN>, passed to Git through C<GIT_ASKPASS> so the token is
+not embedded in Git URLs or process arguments.
+
+See Overleaf's current token documentation:
+
+L<https://docs.overleaf.com/integrations-and-add-ons/git-integration-and-github-synchronization/git-integration/git-integration-authentication-tokens>
 
 =head2 Experimental browser-session operations
 
 The experimental project-listing, ZIP, compile, PDF, and compile-output methods
 use the same authenticated browser session as the Overleaf web application.
-At present the practical authentication method is to copy the value of the
+The practical authentication method is to copy the value of the
 C<overleaf_session2> cookie from a browser in which you are already logged in.
 
-For Firefox:
-
-=over 4
-
-=item 1.
-
-Log into L<https://www.overleaf.com/> normally.
-
-=item 2.
-
-Open Developer Tools with F12 and select Storage.
-
-=item 3.
-
-Open Cookies, select C<https://www.overleaf.com>, and find
-C<overleaf_session2>.
-
-=item 4.
-
-Copy only the cookie's Value, not the literal C<overleaf_session2=> prefix.
-
-=back
-
-Chrome-family browsers expose the same cookie under Developer Tools,
-Application, Storage, Cookies.
+For Firefox, press F12 and open B<Storage -> Cookies ->
+https://www.overleaf.com>.  For Chrome, Edge, and other Chromium-family
+browsers, open B<Application -> Storage -> Cookies ->
+https://www.overleaf.com>.  Find C<overleaf_session2> and copy only its
+B<Value>, not the C<overleaf_session2=> prefix.
 
 The copied value can be supplied directly:
 
@@ -833,9 +859,10 @@ or through the environment:
         experimental => 1,
     );
 
-Treat C<overleaf_session2> like a password.  It grants access as the logged-in
-Overleaf user and must not be committed, logged, pasted into bug reports, or
-otherwise disclosed.
+The CLI's default F<~/.overleaf/session> file contains that value on exactly one
+line.  Treat it like a password.  It grants access as the logged-in Overleaf
+user and must not be committed, logged, pasted into bug reports, or otherwise
+disclosed.
 
 =head2 Session lifetime
 
@@ -915,17 +942,31 @@ project ZIP download, remote compilation, PDF retrieval, and build artifacts.
 
 =back
 
-For day-to-day work, a practical session-based setup is:
+For day-to-day work, the CLI standardizes its two private credentials under
+F<~/.overleaf/>.  Create the directory and files once:
+
+    mkdir -p ~/.overleaf
+    chmod 700 ~/.overleaf
 
     # Copy only the value of the overleaf_session2 browser cookie.
-    printf '%s\n' 'PASTE_COOKIE_VALUE_HERE' > ~/.ol-session.txt
-    chmod 600 ~/.ol-session.txt
+    read -rsp 'Paste overleaf_session2 value: ' OL_SESSION; printf '\n'
+    printf '%s\n' "$OL_SESSION" > ~/.overleaf/session
+    unset OL_SESSION
+    chmod 600 ~/.overleaf/session
 
-    SESSION=~/.ol-session.txt
+    # Copy only the Overleaf Git authentication token.
+    read -rsp 'Paste Overleaf Git token: ' OL_GIT_TOKEN; printf '\n'
+    printf '%s\n' "$OL_GIT_TOKEN" > ~/.overleaf/git-token
+    unset OL_GIT_TOKEN
+    chmod 600 ~/.overleaf/git-token
 
-    overleaf --experimental \
-        --session-file "$SESSION" \
-        bootstrap
+Both files are discovered automatically.  Credential files must live below
+F<~/.overleaf/> and should be created with mode C<0600>; the CLI verifies exact
+mode where POSIX permissions are enforceable and handles MSYS2/Windows
+C<noacl> filesystems specially.  C<OVERLEAF_SESSION> and C<OVERLEAF_GIT_TOKEN>
+are supported as environment-variable alternatives.
+
+    overleaf --experimental bootstrap
 
 A successful bootstrap prints:
 
@@ -933,16 +974,13 @@ A successful bootstrap prints:
 
 List projects and choose the project ID you want to work with:
 
-    overleaf --experimental \
-        --session-file "$SESSION" \
-        projects
+    overleaf --experimental projects
 
     ID=0123456789abcdef
 
 A project ZIP is the easiest way to inspect the source tree:
 
     overleaf --experimental \
-        --session-file "$SESSION" \
         --output project.zip \
         zip "$ID"
 
@@ -953,9 +991,7 @@ There are two useful C<compile> forms.  The low-level remote form compiles
 whatever is already present in an Overleaf project and lists B<build
 artifacts>, not source files:
 
-    overleaf --experimental \
-        --session-file "$SESSION" \
-        compile "$ID"
+    overleaf --experimental compile "$ID"
 
 The higher-level local form is intended for ordinary work in an Overleaf Git
 checkout.  It discovers the project ID from the Git remote, requires a clean
@@ -966,9 +1002,11 @@ requested root document, and downloads the resulting PDF:
     git add .
     git commit -m 'revise paper'
 
-    overleaf --experimental \
-        --session-file "$SESSION" \
-        compile main.tex
+    overleaf --experimental compile main.tex
+
+The local workflow discovers the Overleaf remote branch from the current
+branch's upstream or the remote C<HEAD>; it does not hard-code C<master> or
+C<main>.  The complete committed project is pushed as C<HEAD:E<lt>branchE<gt>>.
 
 This writes F<main.pdf> by default.  Omitting C<main.tex> uses Overleaf's
 configured root and names the PDF from the repository directory.  C<--output>
@@ -989,7 +1027,6 @@ A useful way to discover the root TeX document used by Overleaf is to retrieve
 the compilation log and inspect its initial C<**filename.tex> line:
 
     overleaf --experimental \
-        --session-file "$SESSION" \
         --output output.log \
         output "$ID" output.log
 
@@ -1000,14 +1037,12 @@ Once the root is known, it can be requested explicitly:
     ROOT_TEX=user_guide.tex
 
     overleaf --experimental \
-        --session-file "$SESSION" \
         --resource-path "$ROOT_TEX" \
         compile "$ID"
 
 Download the resulting PDF:
 
     overleaf --experimental \
-        --session-file "$SESSION" \
         --resource-path "$ROOT_TEX" \
         --output document.pdf \
         pdf "$ID"
@@ -1038,10 +1073,16 @@ For an existing local Git repository, add Overleaf as a named remote:
     overleaf remote-add . "$ID" overleaf
     git remote -v
 
-Overleaf's Git bridge represents a single linear project history and currently
-uses the remote C<master> branch.  When connecting an unrelated existing
-repository, consult Overleaf's Git integration documentation before the first
-pull or push.
+Overleaf's Git bridge represents a single linear project history.  The CLI
+discovers the branch tracked/advertised by the selected remote rather than
+hard-coding C<master> or C<main>; C<--remote-branch NAME> is available when
+local Git metadata is insufficient.
+
+The CLI's standard private credentials are F<~/.overleaf/session> for the
+browser session and F<~/.overleaf/git-token> for the Git authentication token.
+Both should be created with mode C<0600>.  C<OVERLEAF_SESSION> and
+C<OVERLEAF_GIT_TOKEN> are also supported.  See C<overleaf --help> for the
+complete setup, MSYS2/Windows permission note, and precedence rules.
 
 C<overleaf --help> contains the complete command reference and a more detailed
 start-to-finish walkthrough.
@@ -1111,9 +1152,9 @@ L<https://science.perlcommunity.org/spj/announcement>
 
 Brett Estrade L<< <oodler@cpan.org> >>
 
-Member, Perl Community Science Perl Committee.
+Member, Perl Community's Science Perl Committee.
 
-Co-Editor, Science Perl Journal.
+Co-Editor, The Science Perl Journal.
 
 =head1 LICENSE AND COPYRIGHT
 
