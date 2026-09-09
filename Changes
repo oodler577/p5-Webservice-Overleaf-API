@@ -57,43 +57,22 @@ Revision history for Webservice::Overleaf::API.
        module API and overleaf client
 
 0.06 Tue Sep 8 19:31:00 2026
-     - local compile cleanliness checks now ignore only the untracked PDF
-       output produced by a previous compile, so repeated compile/download
-       cycles do not block themselves
-     - Overleaf Cloud Git URLs include the documented non-secret git username
-       while authentication tokens remain outside URLs and command arguments
+     - documented the Git bridge as the source synchronization interface, the
+       ZIP as an exported project snapshot, and the tool's use in Science Perl
+       Journal author/editor workflows
      - added a high-level local `overleaf compile [ROOT.tex]` workflow that
-       infers the Overleaf project from the Git remote, requires a clean work
-       tree, pushes the complete committed project, compiles remotely, and
-       downloads the PDF produced by that compile
+       infers the Overleaf project and branch from Git, pushes the committed
+       project, compiles remotely, and downloads the resulting PDF
      - retained `compile PROJECT_ID` as the low-level remote-only operation and
-       added --no-push, --remote, and --output behavior for the local workflow
-     - treat the Git bridge as the local project synchronization interface and
-       the project ZIP as an export/snapshot; no attempt is made to guess which
-       .tex, .bib, image, style, or other file extensions belong in a build
-     - added mocked/hermetic tests for project-ID inference, Git branch
-       discovery, dirty-worktree protection, --no-push, compile, and PDF download
-     - standardized private client credentials under ~/.overleaf/session and
-       ~/.overleaf/git-token, replacing the earlier ~/.ol-session.txt convention;
-       credential files must be stored under ~/.overleaf and are verified as
-       mode 0600 where POSIX modes are enforceable, with OVERLEAF_SESSION and
-       OVERLEAF_GIT_TOKEN environment overrides
-     - use a temporary GIT_ASKPASS helper for configured Git tokens so the token
-       is not embedded in Git URLs or process arguments; the username is the
-       Overleaf-documented `git`
-     - discover the actual Overleaf remote tracking/default branch rather than
-       hard-coding master or main; --remote-branch NAME is available when a
-       repository lacks enough local remote metadata
-     - declared the core Cwd, File::Basename, File::Spec, and File::Temp
-       modules used by the command-line Git/credential workflow as runtime
-       prerequisites
-     - documented the tool's practical use in support of Science Perl Journal
-       author/editor workflows, with modest invitations and links for Science
-       Perl Committee participants, prospective Journal authors, and readers
-     - expanded authentication documentation around Overleaf's separate
-       browser-session and Git-token systems, including exact browser-cookie
-       discovery, Account Settings / Integrations token generation, independent
-       authentication tests, troubleshooting, and combined workflows
-     - made credential-file mode validation portable to MSYS2/Windows noacl
-       mounts while retaining exact 0600 enforcement on POSIX filesystems
-       where Unix permission modes are actually enforceable
+       added --no-push, --remote, --remote-branch, and --output support
+     - standardized credentials under ~/.overleaf/session and
+       ~/.overleaf/git-token, with OVERLEAF_SESSION and OVERLEAF_GIT_TOKEN
+       environment overrides and secure Git authentication via GIT_ASKPASS
+     - added portable credential-permission checks for POSIX and MSYS2/Windows
+       environments and documented Overleaf's separate browser-session and Git
+       token authentication workflows
+     - improved Git workflow safety with dirty-worktree protection, automatic
+       branch discovery, documented `git` username handling, and exclusion of
+       the generated output PDF from cleanliness checks
+     - expanded tests for Git/project inference, authentication, branch
+       discovery, compile/download behavior, and dirty-worktree handling
