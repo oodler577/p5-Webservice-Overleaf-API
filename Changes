@@ -57,6 +57,11 @@ Revision history for Webservice::Overleaf::API.
        module API and overleaf client
 
 0.06 Tue Sep 8 19:31:00 2026
+     - local compile cleanliness checks now ignore only the untracked PDF
+       output produced by a previous compile, so repeated compile/download
+       cycles do not block themselves
+     - Overleaf Cloud Git URLs include the documented non-secret git username
+       while authentication tokens remain outside URLs and command arguments
      - added a high-level local `overleaf compile [ROOT.tex]` workflow that
        infers the Overleaf project from the Git remote, requires a clean work
        tree, pushes the complete committed project, compiles remotely, and

@@ -641,6 +641,9 @@ cat document.chktex
 
 Only artifacts returned by the Overleaf compile can be downloaded this way.
 
+
+A repeated local compile does not reject the untracked PDF that the client itself downloaded on the previous run. Only that expected output path is ignored; other untracked files and any tracked modifications still block a push.
+
 ## Git integration
 
 The Git bridge is separate from the browser-session interface. It does not use

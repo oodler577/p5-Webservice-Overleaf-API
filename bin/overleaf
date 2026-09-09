@@ -566,6 +566,41 @@ sub _local_pdf_name {
     return basename($repo_root) . '.pdf';
 }
 
+sub _repo_relative_output {
+    my ($repo_root, $filename) = @_;
+    return if !defined($filename) || $filename eq q{};
+
+    my $absolute = File::Spec->rel2abs($filename);
+    my $relative = File::Spec->abs2rel($absolute, $repo_root);
+    return if $relative eq '..' || $relative =~ m{\A\.\.[\\/]};
+
+    $relative =~ s{\\}{/}g;
+    $relative =~ s{\A\./}{};
+    return $relative;
+}
+
+sub _git_dirty_entries {
+    my ($repo_root, $ignored_untracked) = @_;
+
+    my $dirty = _git_capture(
+        'git', '-C', $repo_root,
+        '-c', 'core.quotepath=false',
+        'status', '--porcelain'
+    );
+    return if $dirty eq q{};
+
+    my @changes = split /\r?\n/, $dirty;
+    if (defined($ignored_untracked) && $ignored_untracked ne q{}) {
+        @changes = grep {
+            my $status = length($_) >= 2 ? substr($_, 0, 2) : q{};
+            my $path   = length($_) >= 4 ? substr($_, 3) : q{};
+            !($status eq '??' && $path eq $ignored_untracked);
+        } @changes;
+    }
+
+    return @changes;
+}
+
 sub _looks_like_local_compile {
     my $ARGV = shift;
     return 1 if !@$ARGV;
@@ -612,6 +647,10 @@ sub _compile_local_project {
     }
 
     my $resource_path = _local_root_resource($repo_root, $root_arg);
+    my $to = defined($o->output)
+        ? $o->output
+        : _local_pdf_name($repo_root, $resource_path);
+    my $ignored_output = _repo_relative_output($repo_root, $to);
 
     if ($o->push) {
         if (defined $resource_path) {
@@ -622,9 +661,12 @@ sub _compile_local_project {
                 if $tracked eq q{};
         }
 
-        my $dirty = _git_capture('git', '-C', $repo_root, 'status', '--porcelain');
-        if ($dirty ne q{}) {
-            my @changes = split /\r?\n/, $dirty;
+        # A PDF downloaded by a previous successful local compile is a build
+        # artifact produced by this client, not source waiting to be pushed.
+        # Ignore only that expected output when it is untracked.  A tracked or
+        # modified PDF still counts as a real work-tree change.
+        my @changes = _git_dirty_entries($repo_root, $ignored_output);
+        if (@changes) {
             @changes = @changes[0 .. 19] if @changes > 20;
             croak "local repository has uncommitted changes; commit or stash "
                 . "them before compiling:\n  " . join("\n  ", @changes)
@@ -663,9 +705,6 @@ sub _compile_local_project {
         if defined $resource_path;
 
     my $result = $Client->compile($project_id, %compile_opts);
-    my $to = defined($o->output)
-        ? $o->output
-        : _local_pdf_name($repo_root, $resource_path);
 
     my $saved = $Client->download_pdf(
         $project_id,

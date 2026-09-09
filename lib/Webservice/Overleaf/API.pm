@@ -75,7 +75,15 @@ sub project_url {
 sub git_url {
     my ($self, $project_id) = @_;
     $project_id = _project_id($project_id);
-    return $self->git_base_url . '/' . $project_id;
+
+    my $base = $self->git_base_url;
+
+    # Overleaf Cloud documents the public Git username as "git".  Keep the
+    # token out of the URL, but include that non-secret username so ordinary
+    # Git does not guess an account email address when it needs credentials.
+    $base =~ s{\Ahttps://git\.overleaf\.com(?=/|\z)}{https://git\@git.overleaf.com};
+
+    return $base . '/' . $project_id;
 }
 
 sub open_uri {

@@ -84,7 +84,7 @@ my @git_calls;
         return 'origin/main'
             if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
         return 'main.tex' if $joined eq "git -C $tmp ls-files -- main.tex";
-        return q{} if $joined eq "git -C $tmp status --porcelain";
+        return q{} if $joined eq "git -C $tmp -c core.quotepath=false status --porcelain";
         die "unexpected git command: $joined";
     };
 
@@ -131,7 +131,7 @@ my @git_calls;
         return 'overleaf/main'
             if $joined eq "git -C $tmp symbolic-ref --quiet --short refs/remotes/overleaf/HEAD";
         return 'main.tex' if $joined eq "git -C $tmp ls-files -- main.tex";
-        return ' M main.tex' if $joined eq "git -C $tmp status --porcelain";
+        return ' M main.tex' if $joined eq "git -C $tmp -c core.quotepath=false status --porcelain";
         die "unexpected git command: $joined";
     };
 
@@ -156,7 +156,7 @@ my @git_calls;
         return 'origin/main'
             if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
         die "status should not be queried with --no-push"
-            if $joined eq "git -C $tmp status --porcelain";
+            if $joined eq "git -C $tmp -c core.quotepath=false status --porcelain";
         die "unexpected git command: $joined";
     };
 
@@ -170,6 +170,33 @@ my @git_calls;
         '--no-push source is explicit';
     is $client->{calls}[0][0], 'compile', '--no-push skips Git push';
     is $client->{calls}[1][-1], 'remote.pdf', '--output controls downloaded PDF name';
+}
+
+
+{
+    no warnings 'redefine';
+    local *local::bin::overleaf::_git_capture = sub {
+        my @cmd = @_;
+        my $joined = join q{ }, @cmd;
+        return $tmp if $joined eq 'git rev-parse --show-toplevel';
+        return 'origin' if $joined eq "git -C $tmp remote";
+        return 'https://git@git.overleaf.com/abc123'
+            if $joined eq "git -C $tmp remote get-url origin";
+        return 'origin/main'
+            if $joined eq "git -C $tmp rev-parse --abbrev-ref --symbolic-full-name \@{upstream}";
+        return 'main.tex' if $joined eq "git -C $tmp ls-files -- main.tex";
+        return '?? main.pdf'
+            if $joined eq "git -C $tmp -c core.quotepath=false status --porcelain";
+        die "unexpected git command: $joined";
+    };
+
+    my $client = Local::CompileClient->new;
+    my $opts = Local::CompileOptions->new(push => 1);
+    my @args = ('main.tex');
+    my ($status, $out, $err) = capture_local_compile($client, \@args, $opts);
+    is $status, 0, 'previous untracked generated PDF does not block local compile';
+    is $err, q{}, 'generated PDF exception is quiet';
+    is $client->{calls}[0][0], 'push', 'generated PDF exception still permits push';
 }
 
 ok local::bin::overleaf::_looks_like_local_compile([]),
